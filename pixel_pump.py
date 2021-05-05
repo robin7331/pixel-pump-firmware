@@ -1,5 +1,6 @@
 from button import ButtonEvent
 from settings_manager import SettingsManager
+import utime
 
 
 class PowerMode:
@@ -178,6 +179,7 @@ class LiftState(State):
 class DropState(State):
     def __init__(self, device):
         super().__init__(device)
+        self.last_motor_start = 0
 
     def on_enter(self, previous_state):
         self.device.settings_manager.set_mode(1)
@@ -194,13 +196,18 @@ class DropState(State):
         self.paused = True
         self.device.motor.stop()
         self.device.trigger_button.pulsate(
-                Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
+            Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
 
     def set_running(self):
         self.paused = False
         self.device.motor.start()
         self.device.trigger_button.stop_pulsating()
         self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
+        self.last_motor_start = utime.ticks_ms()
+
+    def vent(self):
+        self.device.nc_valve.activate()
+        self.device.nc_valve.deactivate(500)
 
     def to_lift(self):
         self.device.set_state(LiftState(self.device))
@@ -210,8 +217,7 @@ class DropState(State):
             self.set_running()
         else:
             self.set_paused()
-            self.device.nc_valve.activate()
-            self.device.nc_valve.deactivate(500)
+            self.vent()
 
     def to_reverse(self):
         self.device.set_state(ReverseState(self.device))
@@ -224,14 +230,18 @@ class DropState(State):
             self.set_running()
         else:
             self.device.motor.stop()
-            self.device.nc_valve.activate()
-            self.device.nc_valve.deactivate(500)
+            self.vent()
             self.device.trigger_button.clear_color()
 
     def trigger_off(self):
-        self.device.motor.start()
-        self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
+        self.set_running()
         self.device.nc_valve.deactivate()
+
+    def tick(self):
+        if not self.paused and self.device.motor.running:
+            if (utime.ticks_ms() - self.last_motor_start) > 15000:
+                self.set_paused()
+                self.vent()
 
 
 class ReverseState(State):

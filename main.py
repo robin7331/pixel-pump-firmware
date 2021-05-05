@@ -7,7 +7,7 @@ from valve import Valve
 from pixel_pump import PixelPump, PowerMode
 from boot_sequence import run_boot_sequence
 from motor import Motor
-
+import utime
 
 foot_aux = Pin(19, Pin.IN, Pin.PULL_DOWN)
 
@@ -31,6 +31,7 @@ def dropBtnTouchUp(btn):
     global pixel_pump
     pixel_pump.state.to_drop()
 
+
 def reverse_buttonTouchDown(btn):
     global pixel_pump
     pixel_pump.state.to_reverse()
@@ -44,6 +45,7 @@ def trigger_buttonTouchDown(btn):
 def trigger_buttonTouchUp(btn):
     global pixel_pump
     pixel_pump.state.trigger_off()
+
 
 def on_button_event(btn, event):
     global pixel_pump
@@ -124,15 +126,16 @@ pixel_pump = PixelPump(motor=motor,
                        three_way_valve=three_way_valve)
 
 # Lets render the buttons at 30 fps
-uiTimer = Timer()
-uiTimer.init(freq=30, mode=Timer.PERIODIC,
-             callback=lambda t: renderer.flush_frame_buffer())
+# uiTimer = Timer()
+# uiTimer.init(freq=30, mode=Timer.PERIODIC,
+#              callback=lambda t: renderer.flush_frame_buffer())
 
 # Lets run a fancy rainbow boot sequence followed by a few relay clicks because we can
 # run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
 
-while True:
+rendered_at = 0
 
+while True:
     lift_button.tick()
     drop_button.tick()
     low_button.tick()
@@ -147,3 +150,8 @@ while True:
     motor.tick()
 
     pixel_pump.tick()
+
+    # Render the UI at 30 FPS.
+    if utime.ticks_ms() - rendered_at > 33:
+        renderer.flush_frame_buffer()
+        rendered_at = utime.ticks_ms()

@@ -133,7 +133,7 @@ class Button:
     def stop_pulsating(self):
         self.pulsing = False
 
-    def is_color_set(self, source_color, source_brightness, colorMargin=10, brightnessMargin=0.05):
+    def is_color_set(self, source_color, source_brightness, colorMargin=10, brightnessMargin=0.01):
         for i in range(2):
             if abs(source_color[i]-self.left_color[i]) > colorMargin:
                 return False

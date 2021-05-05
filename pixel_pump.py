@@ -1,13 +1,10 @@
 from button import ButtonEvent
+from settings_manager import SettingsManager
+
 
 class PowerMode:
     HIGH = 1
     LOW = 0
-
-
-class Direction:
-    SUCK = 0
-    BLOW = 1
 
 
 class Colors:
@@ -15,12 +12,14 @@ class Colors:
     BLUE = (90, 183, 232)
     RED = (242, 31, 31)
     GREEN = (63, 242, 31)
+    YELLOW = (255, 206, 48)
+    WHITE = (255, 255, 255)
 
 
 class Brightness:
-    DIMMER = 0.08
-    DEFAULT = 0.12
-    BRIGHTER = 0.5
+    DIMMER = 0.06
+    DEFAULT = 0.19
+    BRIGHTER = 0.6
 
 
 class PixelPump:
@@ -37,13 +36,28 @@ class PixelPump:
         self.no_valve = no_valve
         self.three_way_valve = three_way_valve
         self.power_mode = None
-        self.direction = None
         self.last_state_class = None
         self.state = None
+        self.high_duty = 0
+        self.low_duty = 0
 
-        self.set_state(LiftState(self))
-        self.set_power_mode(PowerMode.LOW)
-        self.set_direction(Direction.SUCK)
+        self.settings_manager = SettingsManager()
+        self.ui_renderer.brightness_modifier = self.settings_manager.get_brightness()
+        mode = self.settings_manager.get_mode()
+        if mode is 0:
+            self.set_state(LiftState(self))
+        elif mode is 1:
+            self.set_state(DropState(self))
+        elif mode is 2:
+            self.set_state(ReverseState(self))
+        else:
+            self.set_state(LiftState(self))
+
+        power_mode = self.settings_manager.get_power_mode()
+        self.set_power_mode(power_mode)
+
+        self.high_duty = self.settings_manager.get_high_pwm_duty()
+        self.low_duty = self.settings_manager.get_low_pwm_duty()
 
     def in_state(self, state):
         return isinstance(self.state, state)
@@ -62,6 +76,7 @@ class PixelPump:
 
     def set_power_mode(self, power_mode):
         self.power_mode = power_mode
+        self.settings_manager.set_power_mode(power_mode)
         if self.power_mode is PowerMode.HIGH:
             self.high_button.set_color(Colors.BLUE, Brightness.DEFAULT)
             self.low_button.clear_color()
@@ -69,18 +84,11 @@ class PixelPump:
             self.low_button.set_color(Colors.BLUE, Brightness.DEFAULT)
             self.high_button.clear_color()
 
-    def set_direction(self, direction):
-        self.direction = direction
-        if self.direction is Direction.SUCK:
-            self.reverse_button.clear_color()
-        else:
-            self.reverse_button.set_color((242, 31, 31), Brightness.DEFAULT)
-
     def target_motor_pwm(self):
         if self.power_mode is PowerMode.HIGH:
-            return 255
+            return self.high_duty
         else:
-            return 200
+            return self.low_duty
 
     def tick(self):
         self.motor.set_pwm(self.target_motor_pwm())
@@ -116,10 +124,16 @@ class State:
         pass
 
     def on_button_event(self, button, event):
-        if button is self.device.low_button and event is ButtonEvent.TOUCH_UP:
-            self.device.set_power_mode(PowerMode.LOW)
-        if button is self.device.high_button and event is ButtonEvent.TOUCH_UP:
-            self.device.set_power_mode(PowerMode.HIGH)
+        if button is self.device.low_button:
+            if event is ButtonEvent.TOUCH_UP:
+                self.device.set_power_mode(PowerMode.LOW)
+            if event is ButtonEvent.LONG_PRESS:
+                self.device.set_state(LowPowerSettings(self.device))
+        if button is self.device.high_button:
+            if event is ButtonEvent.TOUCH_UP:
+                self.device.set_power_mode(PowerMode.HIGH)
+            if event is ButtonEvent.LONG_PRESS:
+                self.device.set_state(HighPowerSettings(self.device))
         pass
 
     def tick(self):
@@ -131,6 +145,7 @@ class LiftState(State):
         super().__init__(device)
 
     def on_enter(self, previous_state):
+        self.device.settings_manager.set_mode(0)
         self.device.lift_button.set_color(Colors.BLUE, Brightness.DEFAULT)
         self.device.motor.stop()
         self.device.nc_valve.deactivate()
@@ -165,6 +180,7 @@ class DropState(State):
         super().__init__(device)
 
     def on_enter(self, previous_state):
+        self.device.settings_manager.set_mode(1)
         self.device.drop_button.set_color(Colors.BLUE, Brightness.DEFAULT)
         self.device.trigger_button.pulsate(
             Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
@@ -213,6 +229,7 @@ class ReverseState(State):
         super().__init__(device)
 
     def on_enter(self, previous_state):
+        self.device.settings_manager.set_mode(2)
         self.device.reverse_button.set_color(Colors.RED, Brightness.DEFAULT)
         self.device.trigger_button.pulsate(
             Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
@@ -301,5 +318,121 @@ class BrightnessSettings(State):
         self.device.reverse_button.clear_color()
         self.device.set_power_mode(self.device.power_mode)
         self.device.ui_renderer.brightness_modifier = self.current_brightness_modifier
+        self.device.settings_manager.set_brightness(
+            self.current_brightness_modifier)
         self.device.set_last_state()
 
+
+class LowPowerSettings(State):
+    def __init__(self, device):
+        super().__init__(device)
+        self.old_duty = None
+        self.current_duty = None
+        self.old_power_mode = None
+
+    def on_enter(self, previous_state):
+        self.old_duty = self.device.low_duty
+        if self.old_power_mode is not PowerMode.LOW:
+            self.old_power_mode = self.device.power_mode
+            self.device.set_power_mode(PowerMode.LOW)
+        self.device.motor.start()
+        self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
+        self.device.reverse_button.set_color(Colors.RED, Brightness.DEFAULT)
+        self.device.low_button.pulsate(
+            Colors.BLUE, Brightness.DIMMER, Colors.BLUE, Brightness.DEFAULT)
+        self.device.high_button.set_color(Colors.BLUE, Brightness.DIMMER)
+
+    def on_exit(self, next_state):
+        
+        self.device.motor.stop()
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.low_button.stop_pulsating()
+        self.device.low_button.clear_color()
+        if self.old_power_mode:
+            self.device.set_power_mode(self.old_power_mode)
+        else:
+            self.device.set_power_mode(self.device.power_mode)
+
+    def on_button_event(self, btn, event):
+        if btn is self.device.low_button and event is ButtonEvent.TOUCH_DOWN:
+            duty = self.device.low_duty - 10
+            if duty < 0:
+                duty = 0
+            self.device.low_duty = duty
+        if btn is self.device.high_button and event is ButtonEvent.TOUCH_DOWN:
+            duty = self.device.low_duty + 10
+            if duty > 255:
+                duty = 255
+            self.device.low_duty = duty
+
+    def to_reverse(self):
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.low_duty = self.old_duty
+        self.device.set_power_mode(self.device.power_mode)
+        self.device.set_last_state()
+
+    def trigger_off(self):
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.settings_manager.set_low_pwm_duty(self.device.low_duty)
+        self.device.set_power_mode(self.device.power_mode)
+        self.device.set_last_state()
+
+
+class HighPowerSettings(State):
+    def __init__(self, device):
+        super().__init__(device)
+        self.old_duty = None
+        self.current_duty = None
+        self.old_power_mode = None
+
+    def on_enter(self, previous_state):
+        self.old_duty = self.device.high_duty
+        if self.old_power_mode is not PowerMode.HIGH:
+            self.old_power_mode = self.device.power_mode
+            self.device.set_power_mode(PowerMode.HIGH)
+        self.device.motor.start()
+        self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
+        self.device.reverse_button.set_color(Colors.RED, Brightness.DEFAULT)
+        self.device.low_button.set_color(Colors.BLUE, Brightness.DIMMER)
+        self.device.high_button.pulsate(
+            Colors.BLUE, Brightness.DIMMER, Colors.BLUE, Brightness.DEFAULT)
+
+    def on_exit(self, next_state):
+        self.device.motor.stop()
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.high_button.clear_color()
+        self.device.high_button.stop_pulsating()
+        if self.old_power_mode:
+            self.device.set_power_mode(self.old_power_mode)
+        else:
+            self.device.set_power_mode(self.device.power_mode)
+
+    def on_button_event(self, btn, event):
+        if btn is self.device.low_button and event is ButtonEvent.TOUCH_DOWN:
+            duty = self.device.high_duty - 10
+            if duty < 0:
+                duty = 0
+            self.device.high_duty = duty
+        if btn is self.device.high_button and event is ButtonEvent.TOUCH_DOWN:
+            duty = self.device.high_duty + 10
+            if duty > 255:
+                duty = 255
+            self.device.high_duty = duty
+
+    def to_reverse(self):
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.high_duty = self.old_duty
+        self.device.set_power_mode(self.device.power_mode)
+        self.device.set_last_state()
+
+    def trigger_off(self):
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.settings_manager.set_high_pwm_duty(self.device.high_duty)
+        self.device.set_power_mode(self.device.power_mode)
+        self.device.set_last_state()

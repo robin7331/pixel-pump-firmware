@@ -18,13 +18,13 @@ def run_boot_sequence(renderer, valves):
         brightness = (i / 255) * 0.3
         for j in range(12):
             rc_index = (j * 256 // 12) + i
-            renderer.setLEDColor(j, wheel(rc_index & 255), brightness)
+            renderer.set_led_color(j, wheel(rc_index & 255), brightness)
             utime.sleep_us(100)
     for i in range(255):
         brightness = 0.3 - ((i / 255) * 0.3)
         for j in range(12):
             rc_index = (j * 256 // 12) + i
-            renderer.setLEDColor(j, wheel(rc_index & 255), brightness)
+            renderer.set_led_color(j, wheel(rc_index & 255), brightness)
             utime.sleep_us(100)
 
     for i in range(len(valves)):

@@ -15,13 +15,13 @@ def wheel(pos):
 
 def run_boot_sequence(renderer, valves):
     for i in range(255):
-        brightness = (i / 255) * 0.3
+        brightness = (i / 255) * 0.28
         for j in range(12):
             rc_index = (j * 256 // 12) + i
             renderer.set_led_color(j, wheel(rc_index & 255), brightness)
             utime.sleep_us(100)
     for i in range(255):
-        brightness = 0.3 - ((i / 255) * 0.3)
+        brightness = 0.28 - ((i / 255) * 0.28)
         for j in range(12):
             rc_index = (j * 256 // 12) + i
             renderer.set_led_color(j, wheel(rc_index & 255), brightness)

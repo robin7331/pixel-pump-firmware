@@ -13,7 +13,6 @@ class Colors:
     BLUE = (90, 183, 232)
     RED = (242, 31, 31)
     GREEN = (63, 242, 31)
-    YELLOW = (255, 206, 48)
     WHITE = (255, 255, 255)
 
 
@@ -237,7 +236,8 @@ class DropState(State):
         else:
             self.device.motor.stop()
             self.vent()
-            self.device.trigger_button.clear_color()
+            self.device.trigger_button.pulsate(
+                Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
 
     def trigger_off(self):
         self.set_running()

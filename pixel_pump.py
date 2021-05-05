@@ -150,10 +150,14 @@ class LiftState(State):
         self.device.lift_button.set_color(Colors.BLUE, Brightness.DEFAULT)
         self.device.motor.stop()
         self.device.nc_valve.deactivate()
+        self.device.trigger_button.pulsate(
+            Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
 
     def on_exit(self, next_state):
         self.device.lift_button.clear_color()
         self.device.nc_valve.deactivate()
+        self.device.trigger_button.stop_pulsating()
+        self.device.trigger_button.clear_color()
 
     def to_drop(self):
         self.device.set_state(DropState(self.device))
@@ -165,12 +169,14 @@ class LiftState(State):
         self.device.set_state(BrightnessSettings(self.device))
 
     def trigger_on(self):
+        self.device.trigger_button.stop_pulsating()
         self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
         self.device.motor.start()
         self.device.nc_valve.deactivate()
 
     def trigger_off(self):
-        self.device.trigger_button.clear_color()
+        self.device.trigger_button.pulsate(
+            Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
         self.device.motor.stop()
         self.device.nc_valve.activate()
         self.device.nc_valve.deactivate(500)

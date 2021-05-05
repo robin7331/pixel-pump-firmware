@@ -61,18 +61,18 @@ class PixelPump:
     def set_power_mode(self, power_mode):
         self.power_mode = power_mode
         if self.power_mode is PowerMode.HIGH:
-            self.high_button.setColor(Colors.BLUE, Brightness.DEFAULT)
-            self.low_button.clearColor()
+            self.high_button.set_color(Colors.BLUE, Brightness.DEFAULT)
+            self.low_button.clear_color()
         else:
-            self.low_button.setColor(Colors.BLUE, Brightness.DEFAULT)
-            self.high_button.clearColor()
+            self.low_button.set_color(Colors.BLUE, Brightness.DEFAULT)
+            self.high_button.clear_color()
 
     def set_direction(self, direction):
         self.direction = direction
         if self.direction is Direction.SUCK:
-            self.reverse_button.clearColor()
+            self.reverse_button.clear_color()
         else:
-            self.reverse_button.setColor((242, 31, 31), Brightness.DEFAULT)
+            self.reverse_button.set_color((242, 31, 31), Brightness.DEFAULT)
 
     def target_motor_pwm(self):
         if self.power_mode is PowerMode.HIGH:
@@ -122,12 +122,12 @@ class LiftState(State):
         super().__init__(device)
 
     def on_enter(self, previous_state):
-        self.device.lift_button.setColor(Colors.BLUE, Brightness.DEFAULT)
+        self.device.lift_button.set_color(Colors.BLUE, Brightness.DEFAULT)
         self.device.motor.stop()
         self.device.nc_valve.deactivate()
 
     def on_exit(self, next_state):
-        self.device.lift_button.clearColor()
+        self.device.lift_button.clear_color()
         self.device.nc_valve.deactivate()
 
     def to_drop(self):
@@ -137,12 +137,12 @@ class LiftState(State):
         self.device.set_state(ReverseState(self.device))
 
     def trigger_on(self):
-        self.device.trigger_button.setColor(Colors.GREEN, Brightness.DEFAULT)
+        self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
         self.device.motor.start()
         self.device.nc_valve.deactivate()
 
     def trigger_off(self):
-        self.device.trigger_button.clearColor()
+        self.device.trigger_button.clear_color()
         self.device.motor.stop()
         self.device.nc_valve.activate()
         self.device.nc_valve.deactivate(500)
@@ -153,15 +153,15 @@ class DropState(State):
         super().__init__(device)
 
     def on_enter(self, previous_state):
-        self.device.drop_button.setColor(Colors.BLUE, Brightness.DEFAULT)
+        self.device.drop_button.set_color(Colors.BLUE, Brightness.DEFAULT)
         self.device.trigger_button.pulsate(
             Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
         self.paused = True
 
     def on_exit(self, next_state):
-        self.device.trigger_button.stopPulsating()
-        self.device.trigger_button.clearColor()
-        self.device.drop_button.clearColor()
+        self.device.trigger_button.stop_pulsating()
+        self.device.trigger_button.clear_color()
+        self.device.drop_button.clear_color()
 
     def to_lift(self):
         self.device.set_state(LiftState(self.device))
@@ -170,7 +170,7 @@ class DropState(State):
         if self.paused:
             self.paused = False
             self.device.motor.start()
-            self.device.trigger_button.stopPulsating()
+            self.device.trigger_button.stop_pulsating()
 
     def to_reverse(self):
         self.device.set_state(ReverseState(self.device))
@@ -179,17 +179,17 @@ class DropState(State):
         if self.paused:
             self.paused = False
             self.device.motor.start()
-            self.device.trigger_button.stopPulsating()
+            self.device.trigger_button.stop_pulsating()
         else:
             self.device.motor.stop()
             self.device.nc_valve.activate()
             self.device.nc_valve.deactivate(500)
 
-        self.device.trigger_button.clearColor()
+        self.device.trigger_button.clear_color()
 
     def trigger_off(self):
         self.device.motor.start()
-        self.device.trigger_button.setColor(Colors.GREEN, Brightness.DEFAULT)
+        self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
         self.device.nc_valve.deactivate()
 
 
@@ -198,14 +198,14 @@ class ReverseState(State):
         super().__init__(device)
 
     def on_enter(self, previous_state):
-        self.device.reverse_button.setColor(Colors.RED, Brightness.DEFAULT)
+        self.device.reverse_button.set_color(Colors.RED, Brightness.DEFAULT)
         self.device.trigger_button.pulsate(
             Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
 
     def on_exit(self, next_state):
-        self.device.reverse_button.clearColor()
-        self.device.trigger_button.stopPulsating()
-        self.device.trigger_button.clearColor()
+        self.device.reverse_button.clear_color()
+        self.device.trigger_button.stop_pulsating()
+        self.device.trigger_button.clear_color()
         self.device.no_valve.deactivate()
         self.device.nc_valve.deactivate()
         self.device.three_way_valve.deactivate()
@@ -217,13 +217,13 @@ class ReverseState(State):
         self.device.set_state(DropState(self.device))
 
     def to_reverse(self):
-        self.device.reverse_button.clearColor()
+        self.device.reverse_button.clear_color()
         self.device.set_last_state()
 
     def trigger_on(self):
         self.device.motor.start()
-        self.device.trigger_button.stopPulsating()
-        self.device.trigger_button.setColor(Colors.GREEN, Brightness.DEFAULT)
+        self.device.trigger_button.stop_pulsating()
+        self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
 
         self.device.three_way_valve.activate()
         self.device.nc_valve.activate(100)

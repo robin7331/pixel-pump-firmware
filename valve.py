@@ -3,31 +3,31 @@ import utime
 
 
 class Valve:
-    def __init__(self, outputPin):
+    def __init__(self, output_pin):
         self.type = type
-        self.outputPin = Pin(outputPin, Pin.OUT)
-        self.deactivateAt = None
-        self.activateAt = None
+        self.output_pin = Pin(output_pin, Pin.OUT)
+        self.deactivate_at = None
+        self.activate_at = None
 
-    def activate(self, delayInMs=0.0):
-        if delayInMs > 0:
-            self.activateAt = utime.ticks_ms() + delayInMs
+    def activate(self, delay_in_ms=0.0):
+        if delay_in_ms > 0:
+            self.activate_at = utime.ticks_ms() + delay_in_ms
         else:
-          self.deactivateAt = None
-          self.activateAt = None
-          self.outputPin.value(1)
+          self.deactivate_at = None
+          self.activate_at = None
+          self.output_pin.value(1)
 
-    def deactivate(self, delayInMs=0.0):
-        if delayInMs > 0:
-            self.deactivateAt = utime.ticks_ms() + delayInMs
+    def deactivate(self, delay_in_ms=0.0):
+        if delay_in_ms > 0:
+            self.deactivate_at = utime.ticks_ms() + delay_in_ms
         else:
-            self.deactivateAt = None
-            self.activateAt = None
-            self.outputPin.value(0)
+            self.deactivate_at = None
+            self.activate_at = None
+            self.output_pin.value(0)
 
     def tick(self):
-        if self.deactivateAt and utime.ticks_ms() >= self.deactivateAt:
+        if self.deactivate_at and utime.ticks_ms() >= self.deactivate_at:
             self.deactivate()
 
-        if self.activateAt and utime.ticks_ms() >= self.activateAt:
+        if self.activate_at and utime.ticks_ms() >= self.activate_at:
             self.activate()

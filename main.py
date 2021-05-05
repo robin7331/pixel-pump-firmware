@@ -4,7 +4,7 @@ from ui_renderer import UIRenderer
 from machine import Timer
 from button import Button
 from valve import Valve
-from pixel_pump import *
+from pixel_pump import PixelPump, PowerMode
 from boot_sequence import run_boot_sequence
 from motor import Motor
 
@@ -54,55 +54,55 @@ def trigger_buttonTouchUp(btn):
 
 def renderBtn(btn):
     global renderer
-    renderer.setLEDColor(
-        btn.leftLedIndex, (btn.leftColor[0], btn.leftColor[1], btn.leftColor[2]), btn.leftColor[3])
-    renderer.setLEDColor(
-        btn.rightLedIndex, (btn.rightColor[0], btn.rightColor[1], btn.rightColor[2]), btn.rightColor[3])
+    renderer.set_led_color(
+        btn.left_led_index, (btn.left_color[0], btn.left_color[1], btn.left_color[2]), btn.left_color[3])
+    renderer.set_led_color(
+        btn.right_led_index, (btn.right_color[0], btn.right_color[1], btn.right_color[2]), btn.right_color[3])
 
 
 lift_button = Button(title='Lift',
-                     leftLedIndex=0,
-                     rightLedIndex=1,
-                     switchPin=16,
-                     onTouchDown=liftBtnTouchUp,
-                     onShouldRender=renderBtn)
+                     left_led_index=0,
+                     right_led_index=1,
+                     switch_pin=16,
+                     on_touch_down=liftBtnTouchUp,
+                     on_should_render=renderBtn)
 
 drop_button = Button(title='Drop',
-                     leftLedIndex=2,
-                     rightLedIndex=3,
-                     switchPin=13,
-                     onTouchDown=dropBtnTouchUp,
-                     onShouldRender=renderBtn)
+                     left_led_index=2,
+                     right_led_index=3,
+                     switch_pin=13,
+                     on_touch_down=dropBtnTouchUp,
+                     on_should_render=renderBtn)
 
 low_button = Button(title='Low',
-                    leftLedIndex=4,
-                    rightLedIndex=5,
-                    switchPin=14,
-                    onTouchUp=low_buttonTouchUp,
-                    onShouldRender=renderBtn)
+                    left_led_index=4,
+                    right_led_index=5,
+                    switch_pin=14,
+                    on_touch_up=low_buttonTouchUp,
+                    on_should_render=renderBtn)
 
 high_button = Button(title='High',
-                     leftLedIndex=6,
-                     rightLedIndex=7,
-                     switchPin=28,
-                     onTouchUp=high_buttonTouchUp,
-                     onShouldRender=renderBtn)
+                     left_led_index=6,
+                     right_led_index=7,
+                     switch_pin=28,
+                     on_touch_up=high_buttonTouchUp,
+                     on_should_render=renderBtn)
 
 reverse_button = Button(title='Reverse',
-                        leftLedIndex=8,
-                        rightLedIndex=9,
-                        switchPin=27,
-                        onTouchDown=reverse_buttonTouchDown,
-                        onShouldRender=renderBtn)
+                        left_led_index=8,
+                        right_led_index=9,
+                        switch_pin=27,
+                        on_touch_down=reverse_buttonTouchDown,
+                        on_should_render=renderBtn)
 
 trigger_button = Button(title='Trigger',
-                        leftLedIndex=10,
-                        rightLedIndex=11,
-                        switchPin=17,
-                        secondarySwitchPin=18,
-                        onTouchUp=trigger_buttonTouchUp,
-                        onTouchDown=trigger_buttonTouchDown,
-                        onShouldRender=renderBtn)
+                        left_led_index=10,
+                        right_led_index=11,
+                        switch_pin=17,
+                        secondary_switch_pin=18,
+                        on_touch_up=trigger_buttonTouchUp,
+                        on_touch_down=trigger_buttonTouchDown,
+                        on_should_render=renderBtn)
 
 no_valve = Valve(15)
 nc_valve = Valve(22)
@@ -122,7 +122,7 @@ pixel_pump = PixelPump(motor=motor,
 # Lets render the buttons at 30 fps
 uiTimer = Timer()
 uiTimer.init(freq=30, mode=Timer.PERIODIC,
-             callback=lambda t: renderer.flushFrameBuffer())
+             callback=lambda t: renderer.flush_frame_buffer())
 
 # Lets run a fancy rainbow boot sequence followed by a few relay clicks because we can
 # run_boot_sequence(renderer, [noValve, ncValve, threeWayValve])

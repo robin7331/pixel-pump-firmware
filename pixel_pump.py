@@ -333,15 +333,15 @@ class BrightnessSettings(State):
 
     def on_button_event(self, btn, event):
         if btn is self.device.low_button and event is ButtonEvent.TOUCH_UP:
-            self.current_brightness_modifier = self.current_brightness_modifier - 0.1
-            if self.current_brightness_modifier < 0:
-                self.current_brightness_modifier = 0
+            self.current_brightness_modifier = self.current_brightness_modifier - 0.05
+            if self.current_brightness_modifier < 0.35:
+                self.current_brightness_modifier = 0.35
             self.device.ui_renderer.brightness_modifier = self.current_brightness_modifier
 
         if btn is self.device.high_button and event is ButtonEvent.TOUCH_UP:
-            self.current_brightness_modifier = self.current_brightness_modifier + 0.1
-            if self.current_brightness_modifier > 1.0:
-                self.current_brightness_modifier = 1.0
+            self.current_brightness_modifier = self.current_brightness_modifier + 0.05
+            if self.current_brightness_modifier > 0.8:
+                self.current_brightness_modifier = 0.8
             self.device.ui_renderer.brightness_modifier = self.current_brightness_modifier
 
     def to_reverse(self):

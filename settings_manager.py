@@ -41,13 +41,13 @@ class SettingsManager:
         return self.settings[property]
 
     def get_brightness(self):
-        return self.get_property('brightness', default=0.6)
+        return self.get_property('brightness', default=0.5)
 
     def set_brightness(self, brightness, persist=True):
-        if brightness > 1.0:
-            brightness = 1.0
-        if brightness < 0:
-            brightness = 0.0
+        if brightness > 0.8:
+            brightness = 0.8
+        if brightness < 0.35:
+            brightness = 0.35
         self.set_property('brightness', brightness, persist)
 
     def get_low_pwm_duty(self):

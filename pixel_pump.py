@@ -4,8 +4,9 @@ import utime
 
 
 class PowerMode:
-    HIGH = 1
     LOW = 0
+    HIGH = 1
+    MAX = 2
 
 
 class Colors:
@@ -85,10 +86,12 @@ class PixelPump:
             self.high_button.clear_color()
 
     def target_motor_pwm(self):
-        if self.power_mode is PowerMode.HIGH:
-            return self.high_duty
-        else:
+        if self.power_mode is PowerMode.LOW:
             return self.low_duty
+        elif self.power_mode is PowerMode.HIGH:
+            return self.high_duty
+        elif self.power_mode is PowerMode.MAX:
+            return 255
 
     def tick(self):
         self.motor.set_pwm(self.target_motor_pwm())
@@ -253,12 +256,17 @@ class DropState(State):
 class ReverseState(State):
     def __init__(self, device):
         super().__init__(device)
+        self.old_power_mode = None
 
     def on_enter(self, previous_state):
         self.device.settings_manager.set_mode(2)
         self.device.reverse_button.set_color(Colors.RED, Brightness.DEFAULT)
         self.device.trigger_button.pulsate(
             Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
+        self.old_power_mode = self.device.power_mode
+        self.device.set_power_mode(PowerMode.MAX)
+        self.device.low_button.clear_color()
+        self.device.high_button.clear_color()
 
     def on_exit(self, next_state):
         self.device.reverse_button.clear_color()
@@ -267,6 +275,7 @@ class ReverseState(State):
         self.device.no_valve.deactivate()
         self.device.nc_valve.deactivate()
         self.device.three_way_valve.deactivate()
+        self.device.set_power_mode(self.old_power_mode)
 
     def to_lift(self):
         self.device.set_state(LiftState(self.device))
@@ -298,6 +307,9 @@ class ReverseState(State):
         self.device.no_valve.deactivate(0)
         self.device.nc_valve.deactivate(100)
         self.device.three_way_valve.deactivate(200)
+
+    def on_button_event(self, button, event):
+        pass
 
 
 class BrightnessSettings(State):

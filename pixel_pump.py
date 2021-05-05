@@ -182,9 +182,7 @@ class DropState(State):
     def on_enter(self, previous_state):
         self.device.settings_manager.set_mode(1)
         self.device.drop_button.set_color(Colors.BLUE, Brightness.DEFAULT)
-        self.device.trigger_button.pulsate(
-            Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
-        self.paused = True
+        self.set_paused()
 
     def on_exit(self, next_state):
         self.device.trigger_button.stop_pulsating()
@@ -192,14 +190,28 @@ class DropState(State):
         self.device.drop_button.clear_color()
         self.device.motor.stop()
 
+    def set_paused(self):
+        self.paused = True
+        self.device.motor.stop()
+        self.device.trigger_button.pulsate(
+                Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
+
+    def set_running(self):
+        self.paused = False
+        self.device.motor.start()
+        self.device.trigger_button.stop_pulsating()
+        self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
+
     def to_lift(self):
         self.device.set_state(LiftState(self.device))
 
     def to_drop(self):
         if self.paused:
-            self.paused = False
-            self.device.motor.start()
-            self.device.trigger_button.stop_pulsating()
+            self.set_running()
+        else:
+            self.set_paused()
+            self.device.nc_valve.activate()
+            self.device.nc_valve.deactivate(500)
 
     def to_reverse(self):
         self.device.set_state(ReverseState(self.device))
@@ -209,15 +221,12 @@ class DropState(State):
 
     def trigger_on(self):
         if self.paused:
-            self.paused = False
-            self.device.motor.start()
-            self.device.trigger_button.stop_pulsating()
+            self.set_running()
         else:
             self.device.motor.stop()
             self.device.nc_valve.activate()
             self.device.nc_valve.deactivate(500)
-
-        self.device.trigger_button.clear_color()
+            self.device.trigger_button.clear_color()
 
     def trigger_off(self):
         self.device.motor.start()

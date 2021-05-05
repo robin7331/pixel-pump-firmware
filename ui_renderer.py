@@ -25,6 +25,7 @@ class UIRenderer:
         self.led_count = 12
         self.buttonCount = self.led_count / 2
         self.is_dirty = True
+        self.brightness_modifier = 1.0
 
         # Basically our frame buffer
         self.pixel_array = array.array("I", [0 for _ in range(self.led_count)])
@@ -47,11 +48,11 @@ class UIRenderer:
         for index, pixelValue in enumerate(self.pixel_array):
             brightness = self.brightness_array[index]
             # 8-bit red dimmed to brightness
-            r = int(((pixelValue >> 8) & 0xFF) * brightness)
+            r = int(((pixelValue >> 8) & 0xFF) * brightness * self.brightness_modifier)
             # 8-bit green dimmed to brightness
-            g = int(((pixelValue >> 16) & 0xFF) * brightness)
+            g = int(((pixelValue >> 16) & 0xFF) * brightness * self.brightness_modifier)
             # 8-bit blue dimmed to brightness
-            b = int((pixelValue & 0xFF) * brightness)
+            b = int((pixelValue & 0xFF) * brightness * self.brightness_modifier)
             # 24-bit color dimmed to brightness
             dimmer_array[index] = (g << 16) + (r << 8) + b
 

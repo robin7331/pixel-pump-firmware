@@ -22,20 +22,14 @@ def liftBtnTouchUp(btn):
     pixel_pump.state.to_lift()
 
 
+def liftBtnLongPress(btn):
+    global pixel_pump
+    pixel_pump.state.to_brightness_settings()
+
+
 def dropBtnTouchUp(btn):
     global pixel_pump
     pixel_pump.state.to_drop()
-
-
-def low_buttonTouchUp(btn):
-    global pixel_pump
-    pixel_pump.set_power_mode(PowerMode.LOW)
-
-
-def high_buttonTouchUp(btn):
-    global pixel_pump
-    pixel_pump.set_power_mode(PowerMode.HIGH)
-
 
 def reverse_buttonTouchDown(btn):
     global pixel_pump
@@ -51,6 +45,10 @@ def trigger_buttonTouchUp(btn):
     global pixel_pump
     pixel_pump.state.trigger_off()
 
+def on_button_event(btn, event):
+    global pixel_pump
+    pixel_pump.state.on_button_event(btn, event)
+
 
 def renderBtn(btn):
     global renderer
@@ -64,13 +62,16 @@ lift_button = Button(title='Lift',
                      left_led_index=0,
                      right_led_index=1,
                      switch_pin=16,
+                     on_button_event=on_button_event,
                      on_touch_down=liftBtnTouchUp,
+                     on_long_press=liftBtnLongPress,
                      on_should_render=renderBtn)
 
 drop_button = Button(title='Drop',
                      left_led_index=2,
                      right_led_index=3,
                      switch_pin=13,
+                     on_button_event=on_button_event,
                      on_touch_down=dropBtnTouchUp,
                      on_should_render=renderBtn)
 
@@ -78,20 +79,21 @@ low_button = Button(title='Low',
                     left_led_index=4,
                     right_led_index=5,
                     switch_pin=14,
-                    on_touch_up=low_buttonTouchUp,
+                    on_button_event=on_button_event,
                     on_should_render=renderBtn)
 
 high_button = Button(title='High',
                      left_led_index=6,
                      right_led_index=7,
                      switch_pin=28,
-                     on_touch_up=high_buttonTouchUp,
+                     on_button_event=on_button_event,
                      on_should_render=renderBtn)
 
 reverse_button = Button(title='Reverse',
                         left_led_index=8,
                         right_led_index=9,
                         switch_pin=27,
+                        on_button_event=on_button_event,
                         on_touch_down=reverse_buttonTouchDown,
                         on_should_render=renderBtn)
 
@@ -100,6 +102,7 @@ trigger_button = Button(title='Trigger',
                         right_led_index=11,
                         switch_pin=17,
                         secondary_switch_pin=18,
+                        on_button_event=on_button_event,
                         on_touch_up=trigger_buttonTouchUp,
                         on_touch_down=trigger_buttonTouchDown,
                         on_should_render=renderBtn)
@@ -109,6 +112,7 @@ nc_valve = Valve(22)
 three_way_valve = Valve(21)
 
 pixel_pump = PixelPump(motor=motor,
+                       ui_renderer=renderer,
                        lift_button=lift_button,
                        drop_button=drop_button,
                        low_button=low_button,
@@ -125,7 +129,7 @@ uiTimer.init(freq=30, mode=Timer.PERIODIC,
              callback=lambda t: renderer.flush_frame_buffer())
 
 # Lets run a fancy rainbow boot sequence followed by a few relay clicks because we can
-# run_boot_sequence(renderer, [noValve, ncValve, threeWayValve])
+# run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
 
 while True:
 

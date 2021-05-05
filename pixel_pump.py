@@ -1,3 +1,4 @@
+from button import ButtonEvent
 
 class PowerMode:
     HIGH = 1
@@ -23,8 +24,9 @@ class Brightness:
 
 
 class PixelPump:
-    def __init__(self, motor, lift_button, drop_button, low_button, high_button, reverse_button, trigger_button, nc_valve, no_valve, three_way_valve):
+    def __init__(self, motor, ui_renderer, lift_button, drop_button, low_button, high_button, reverse_button, trigger_button, nc_valve, no_valve, three_way_valve):
         self.motor = motor
+        self.ui_renderer = ui_renderer
         self.lift_button = lift_button
         self.drop_button = drop_button
         self.low_button = low_button
@@ -101,6 +103,9 @@ class State:
     def to_drop(self):
         pass
 
+    def to_brightness_settings(self):
+        pass
+
     def to_reverse(self):
         pass
 
@@ -110,7 +115,11 @@ class State:
     def trigger_off(self):
         pass
 
-    def on_button_event(self, event, button):
+    def on_button_event(self, button, event):
+        if button is self.device.low_button and event is ButtonEvent.TOUCH_UP:
+            self.device.set_power_mode(PowerMode.LOW)
+        if button is self.device.high_button and event is ButtonEvent.TOUCH_UP:
+            self.device.set_power_mode(PowerMode.HIGH)
         pass
 
     def tick(self):
@@ -135,6 +144,9 @@ class LiftState(State):
 
     def to_reverse(self):
         self.device.set_state(ReverseState(self.device))
+
+    def to_brightness_settings(self):
+        self.device.set_state(BrightnessSettings(self.device))
 
     def trigger_on(self):
         self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
@@ -174,6 +186,9 @@ class DropState(State):
 
     def to_reverse(self):
         self.device.set_state(ReverseState(self.device))
+
+    def to_brightness_settings(self):
+        self.device.set_state(BrightnessSettings(self.device))
 
     def trigger_on(self):
         if self.paused:
@@ -220,6 +235,9 @@ class ReverseState(State):
         self.device.reverse_button.clear_color()
         self.device.set_last_state()
 
+    def to_brightness_settings(self):
+        self.device.set_state(BrightnessSettings(self.device))
+
     def trigger_on(self):
         self.device.motor.start()
         self.device.trigger_button.stop_pulsating()
@@ -237,3 +255,51 @@ class ReverseState(State):
         self.device.no_valve.deactivate(0)
         self.device.nc_valve.deactivate(100)
         self.device.three_way_valve.deactivate(200)
+
+
+class BrightnessSettings(State):
+    def __init__(self, device):
+        super().__init__(device)
+        self.old_brightness_modifier = None
+        self.current_brightness_modifier = None
+
+    def on_enter(self, previous_state):
+        self.old_brightness_modifier = self.device.ui_renderer.brightness_modifier
+        self.current_brightness_modifier = self.device.ui_renderer.brightness_modifier
+        self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
+        self.device.reverse_button.set_color(Colors.RED, Brightness.DEFAULT)
+        self.device.low_button.set_color(Colors.BLUE, Brightness.DEFAULT)
+        self.device.high_button.set_color(Colors.BLUE, Brightness.DEFAULT)
+
+    def on_exit(self, next_state):
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.set_power_mode(self.device.power_mode)
+
+    def on_button_event(self, btn, event):
+        if btn is self.device.low_button and event is ButtonEvent.TOUCH_UP:
+            self.current_brightness_modifier = self.current_brightness_modifier - 0.1
+            if self.current_brightness_modifier < 0:
+                self.current_brightness_modifier = 0
+            self.device.ui_renderer.brightness_modifier = self.current_brightness_modifier
+
+        if btn is self.device.high_button and event is ButtonEvent.TOUCH_UP:
+            self.current_brightness_modifier = self.current_brightness_modifier + 0.1
+            if self.current_brightness_modifier > 1.0:
+                self.current_brightness_modifier = 1.0
+            self.device.ui_renderer.brightness_modifier = self.current_brightness_modifier
+
+    def to_reverse(self):
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.set_power_mode(self.device.power_mode)
+        self.device.ui_renderer.brightness_modifier = self.old_brightness_modifier
+        self.device.set_last_state()
+
+    def trigger_off(self):
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.set_power_mode(self.device.power_mode)
+        self.device.ui_renderer.brightness_modifier = self.current_brightness_modifier
+        self.device.set_last_state()
+

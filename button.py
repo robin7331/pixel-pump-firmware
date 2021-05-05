@@ -53,7 +53,7 @@ class Button:
             if self.on_long_press:
                 self.on_long_press(self)
             if self.on_button_event:
-                self.on_button_event(ButtonEvent.LONG_PRESS)
+                self.on_button_event(self, ButtonEvent.LONG_PRESS)
 
         if state != self.pressed:
             self.pressed = state
@@ -62,18 +62,19 @@ class Button:
                 if self.on_touch_down:
                     self.on_touch_down(self)
                 if self.on_button_event:
-                    self.on_button_event(ButtonEvent.TOUCH_DOWN)
+                    self.on_button_event(self, ButtonEvent.TOUCH_DOWN)
             elif not self.pressed:
                 self.touch_start = 0
                 if self.on_touch_up:
                     self.on_touch_up(self)
                 if self.on_button_event:
-                    self.on_button_event(ButtonEvent.TOUCH_UP)
+                    self.on_button_event(self, ButtonEvent.TOUCH_UP)
 
-        if state and self.on_touch:
-            self.on_touch(self)
-        if self.on_button_event:
-            self.on_button_event(ButtonEvent.TOUCH)
+        if state:
+            if self.on_touch:
+                self.on_touch(self)
+            if self.on_button_event:
+                self.on_button_event(self, ButtonEvent.TOUCH)
 
         if self.pulsing:
             # Pulse to?

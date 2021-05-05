@@ -190,6 +190,7 @@ class DropState(State):
         self.device.trigger_button.stop_pulsating()
         self.device.trigger_button.clear_color()
         self.device.drop_button.clear_color()
+        self.device.motor.stop()
 
     def to_lift(self):
         self.device.set_state(LiftState(self.device))
@@ -399,7 +400,6 @@ class HighPowerSettings(State):
         self.device.high_button.clear_color()
         self.device.high_button.stop_pulsating()
         self.device.set_power_mode(self.old_power_mode)
-        
 
     def on_button_event(self, btn, event):
         if btn is self.device.low_button and event is ButtonEvent.TOUCH_DOWN:

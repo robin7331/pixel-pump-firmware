@@ -1,6 +1,7 @@
 from button import ButtonEvent
 from settings_manager import SettingsManager
 import utime
+import machine
 
 
 class PowerMode:
@@ -343,6 +344,9 @@ class BrightnessSettings(State):
             if self.current_brightness_modifier > 0.8:
                 self.current_brightness_modifier = 0.8
             self.device.ui_renderer.brightness_modifier = self.current_brightness_modifier
+
+        if btn is self.device.drop_button and event is ButtonEvent.LONG_PRESS:
+            machine.bootloader()
 
     def to_reverse(self):
         self.device.trigger_button.clear_color()

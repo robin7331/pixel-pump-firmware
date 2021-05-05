@@ -1,103 +1,55 @@
+
 from machine import Pin, PWM
 from ui_renderer import UIRenderer
 from machine import Timer
 from button import Button
 from valve import Valve
+from pixel_pump import *
 from boot_sequence import run_boot_sequence
+from motor import Motor
 
-powerMode = 1
-operationMode = 1
-dropModePause = True
-reverse = 0
-defaultBrightness = 0.12
 
-noValve = Valve(15)
-ncValve = Valve(22)
-threeWayValve = Valve(21)
-
-foot = Pin(18, Pin.IN, Pin.PULL_DOWN)
 foot_aux = Pin(19, Pin.IN, Pin.PULL_DOWN)
 
-motor = PWM(Pin(20))
-motor.freq(10000)
-motorDuty = 0
+motor = Motor(motorPin=20)
 
 # The UI Renderer class holds the frame buffer and the PIO state machine
 renderer = UIRenderer()
 
 
 def liftBtnTouchUp(btn):
-    global operationMode, defaultBrightness
-    liftButton.setColor((90, 183, 232), defaultBrightness)
-    dropButton.clearColor()
-    operationMode = 1
-    triggerButton.stopPulsating()
-    triggerButton.clearColor()
+    global pixel_pump
+    pixel_pump.state.to_lift()
 
 
 def dropBtnTouchUp(btn):
-    global operationMode, defaultBrightness, dropModePause
-    liftButton.clearColor()
-    if operationMode != 2:
-        operationMode = 2
-        dropModePause = True
-        dropButton.setColor((90, 183, 232), defaultBrightness)
-        triggerButton.pulsate((0,0,0), defaultBrightness, (63, 242, 31), defaultBrightness)
+    global pixel_pump
+    pixel_pump.state.to_drop()
 
 
-def lowButtonTouchUp(btn):
-    global powerMode, defaultBrightness
-    powerMode = 1
-    lowButton.setColor((90, 183, 232), defaultBrightness)
-    highButton.clearColor()
+def low_buttonTouchUp(btn):
+    global pixel_pump
+    pixel_pump.set_power_mode(PowerMode.LOW)
 
 
-def highButtonTouchUp(btn):
-    global powerMode, defaultBrightness
-    powerMode = 2
-    highButton.setColor((90, 183, 232), defaultBrightness)
-    lowButton.clearColor()
+def high_buttonTouchUp(btn):
+    global pixel_pump
+    pixel_pump.set_power_mode(PowerMode.HIGH)
 
 
-def reverseButtonTouchDown(btn):
-    global reverse
-    if reverse is 1:
-        reverseButton.stopPulsating()
-        reverseButton.clearColor()
-        reverse = 0
-        threeWayValve.deactivate()
-        ncValve.deactivate()
-        noValve.deactivate()
+def reverse_buttonTouchDown(btn):
+    global pixel_pump
+    pixel_pump.state.to_reverse()
 
 
-def reverseButtonLongPress(btn):
-    global reverse, defaultBrightness
-    if reverse is 0:
-        reverseButton.setColor((242, 31, 31), defaultBrightness)
-        reverse = 1
-        threeWayValve.activate()
-        ncValve.activate()
-        noValve.activate()
+def trigger_buttonTouchDown(btn):
+    global pixel_pump
+    pixel_pump.state.trigger_on()
 
 
-def triggerButtonTouchDown(btn):
-    global motorDuty, powerMode, defaultBrightness
-    triggerButton.setColor((63, 242, 31), defaultBrightness)
-    motorDuty = 200 if powerMode == 1 else 255
-    if reverse == 0:
-        ncValve.deactivate()
-
-
-def triggerButtonTouchUp(btn):
-    global motorDuty
-    motorDuty = 0
-    if reverse == 0:
-        ncValve.activate()
-        ncValve.deactivate(500)
-    else:
-        noValve.deactivate()
-        noValve.activate(500)
-    triggerButton.clearColor()
+def trigger_buttonTouchUp(btn):
+    global pixel_pump
+    pixel_pump.state.trigger_off()
 
 
 def renderBtn(btn):
@@ -108,26 +60,64 @@ def renderBtn(btn):
         btn.rightLedIndex, (btn.rightColor[0], btn.rightColor[1], btn.rightColor[2]), btn.rightColor[3])
 
 
-liftButton = Button(title='Lift', leftLedIndex=0, rightLedIndex=1,
-                    switchPin=16, onTouchDown=liftBtnTouchUp, onShouldRender=renderBtn)
-dropButton = Button(title='Drop', leftLedIndex=2, rightLedIndex=3,
-                    switchPin=13, onTouchDown=dropBtnTouchUp, onShouldRender=renderBtn)
-lowButton = Button(title='Low', leftLedIndex=4, rightLedIndex=5,
-                   switchPin=14, onTouchUp=lowButtonTouchUp, onShouldRender=renderBtn)
-highButton = Button(title='High', leftLedIndex=6, rightLedIndex=7,
-                    switchPin=28, onTouchUp=highButtonTouchUp, onShouldRender=renderBtn)
-reverseButton = Button(title='Reverse', leftLedIndex=8, rightLedIndex=9,
-                       switchPin=27, onLongPress=reverseButtonLongPress, onTouchDown=reverseButtonTouchDown, onShouldRender=renderBtn)
-triggerButton = Button(title='Trigger', leftLedIndex=10, rightLedIndex=11, switchPin=17, secondarySwitchPin=18,
-                       onTouchUp=triggerButtonTouchUp, onTouchDown=triggerButtonTouchDown, onShouldRender=renderBtn)
+lift_button = Button(title='Lift',
+                     leftLedIndex=0,
+                     rightLedIndex=1,
+                     switchPin=16,
+                     onTouchDown=liftBtnTouchUp,
+                     onShouldRender=renderBtn)
 
-# footPedal = Button(title='Footpedal', leftLedIndex=10, rightLedIndex=11, switchPin=18,
-#                    onTouchUp=triggerButtonTouchUp, onTouchDown=triggerButtonTouchDown, onShouldRender=renderBtn)
+drop_button = Button(title='Drop',
+                     leftLedIndex=2,
+                     rightLedIndex=3,
+                     switchPin=13,
+                     onTouchDown=dropBtnTouchUp,
+                     onShouldRender=renderBtn)
 
-liftButton.setColor((90, 183, 232), defaultBrightness)
-lowButton.setColor((90, 183, 232), defaultBrightness)
+low_button = Button(title='Low',
+                    leftLedIndex=4,
+                    rightLedIndex=5,
+                    switchPin=14,
+                    onTouchUp=low_buttonTouchUp,
+                    onShouldRender=renderBtn)
 
+high_button = Button(title='High',
+                     leftLedIndex=6,
+                     rightLedIndex=7,
+                     switchPin=28,
+                     onTouchUp=high_buttonTouchUp,
+                     onShouldRender=renderBtn)
 
+reverse_button = Button(title='Reverse',
+                        leftLedIndex=8,
+                        rightLedIndex=9,
+                        switchPin=27,
+                        onTouchDown=reverse_buttonTouchDown,
+                        onShouldRender=renderBtn)
+
+trigger_button = Button(title='Trigger',
+                        leftLedIndex=10,
+                        rightLedIndex=11,
+                        switchPin=17,
+                        secondarySwitchPin=18,
+                        onTouchUp=trigger_buttonTouchUp,
+                        onTouchDown=trigger_buttonTouchDown,
+                        onShouldRender=renderBtn)
+
+no_valve = Valve(15)
+nc_valve = Valve(22)
+three_way_valve = Valve(21)
+
+pixel_pump = PixelPump(motor=motor,
+                       lift_button=lift_button,
+                       drop_button=drop_button,
+                       low_button=low_button,
+                       high_button=high_button,
+                       reverse_button=reverse_button,
+                       trigger_button=trigger_button,
+                       nc_valve=nc_valve,
+                       no_valve=no_valve,
+                       three_way_valve=three_way_valve)
 
 # Lets render the buttons at 30 fps
 uiTimer = Timer()
@@ -135,20 +125,21 @@ uiTimer.init(freq=30, mode=Timer.PERIODIC,
              callback=lambda t: renderer.flushFrameBuffer())
 
 # Lets run a fancy rainbow boot sequence followed by a few relay clicks because we can
-run_boot_sequence(renderer, [noValve, ncValve, threeWayValve])
+# run_boot_sequence(renderer, [noValve, ncValve, threeWayValve])
 
 while True:
 
-    motor.duty_u16(motorDuty * motorDuty)
+    lift_button.tick()
+    drop_button.tick()
+    low_button.tick()
+    high_button.tick()
+    reverse_button.tick()
+    trigger_button.tick()
 
-    liftButton.tick()
-    dropButton.tick()
-    lowButton.tick()
-    highButton.tick()
-    reverseButton.tick()
-    triggerButton.tick()
-    # footPedal.tick()
+    no_valve.tick()
+    nc_valve.tick()
+    three_way_valve.tick()
 
-    noValve.tick()
-    ncValve.tick()
-    threeWayValve.tick()
+    motor.tick()
+
+    pixel_pump.tick()

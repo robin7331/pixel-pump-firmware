@@ -2,8 +2,16 @@ from machine import Pin
 import utime
 import math
 
+
+class ButtonEvent:
+    TOUCH_DOWN = 0
+    TOUCH_UP = 1
+    TOUCH = 2
+    LONG_PRESS = 3
+
+
 class Button:
-    def __init__(self, title, leftLedIndex, rightLedIndex, switchPin, secondarySwitchPin=None, onTouchDown=None, onTouchUp=None, onTouch=None, onLongPress=None, onShouldRender=None, lerpSpeed=0.25):
+    def __init__(self, title, leftLedIndex, rightLedIndex, switchPin, secondarySwitchPin=None, onButtonEvent=None, onTouchDown=None, onTouchUp=None, onTouch=None, onLongPress=None, onShouldRender=None, lerpSpeed=0.25):
         self.title = title
         self.pin = Pin(switchPin, Pin.IN, Pin.PULL_DOWN)
         self.secondaryPin = None
@@ -11,6 +19,7 @@ class Button:
             self.secondaryPin = Pin(secondarySwitchPin, Pin.IN, Pin.PULL_DOWN)
         self.leftLedIndex = leftLedIndex
         self.rightLedIndex = rightLedIndex
+        self.onButtonEvent = onButtonEvent
         self.onTouchDown = onTouchDown
         self.onTouchUp = onTouchUp
         self.onShouldRender = onShouldRender
@@ -26,12 +35,10 @@ class Button:
         self.pulseToColor = None
         self.pulseToBrightness = None
         self.pulseDirection = 0
-
-    leftColor = (0, 0, 0, 0.0)
-    rightColor = (0, 0, 0, 0.0)
-
-    leftTargetColor = leftColor
-    rightTargetColor = rightColor
+        self.leftColor = (0, 0, 0, 0.0)
+        self.rightColor = (0, 0, 0, 0.0)
+        self.leftTargetColor = self.leftColor
+        self.rightTargetColor = self.rightColor
 
     def tick(self):
 
@@ -45,7 +52,8 @@ class Button:
             self.touchStart = 0
             if self.onLongPress:
                 self.onLongPress(self)
-            
+            if self.onButtonEvent:
+                self.onButtonEvent(ButtonEvent.LONG_PRESS)
 
         if state != self.pressed:
             self.pressed = state
@@ -53,13 +61,19 @@ class Button:
                 self.touchStart = utime.ticks_ms()
                 if self.onTouchDown:
                     self.onTouchDown(self)
+                if self.onButtonEvent:
+                    self.onButtonEvent(ButtonEvent.TOUCH_DOWN)
             elif not self.pressed:
                 self.touchStart = 0
                 if self.onTouchUp:
                     self.onTouchUp(self)
+                if self.onButtonEvent:
+                    self.onButtonEvent(ButtonEvent.TOUCH_UP)
 
         if state and self.onTouch:
             self.onTouch(self)
+        if self.onButtonEvent:
+            self.onButtonEvent(ButtonEvent.TOUCH)
 
         if self.pulsing:
             # Pulse to?
@@ -109,7 +123,7 @@ class Button:
 
     def pulsate(self, fromColor, fromBrightness, toColor, toBrightness):
         self.pulsing = True
-        self.pulseDirection = 1 
+        self.pulseDirection = 1
         self.pulseFromColor = fromColor
         self.pulseFromBrightness = fromBrightness
         self.pulseToColor = toColor
@@ -127,4 +141,3 @@ class Button:
             return False
 
         return True
-

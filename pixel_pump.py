@@ -18,9 +18,9 @@ class Colors:
 
 
 class Brightness:
-    DIMMER = 0.06
+    DIMMER = 0.12
     DEFAULT = 0.19
-    BRIGHTER = 0.6
+    BRIGHTER = 0.32
 
 
 class PixelPump:
@@ -376,7 +376,7 @@ class LowPowerSettings(State):
         self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
         self.device.reverse_button.set_color(Colors.RED, Brightness.DEFAULT)
         self.device.low_button.pulsate(
-            Colors.BLUE, Brightness.DIMMER, Colors.BLUE, Brightness.DEFAULT)
+            Colors.BLUE, Brightness.DIMMER, Colors.BLUE, Brightness.BRIGHTER)
         self.device.high_button.set_color(Colors.BLUE, Brightness.DIMMER)
 
     def on_exit(self, next_state):
@@ -428,7 +428,7 @@ class HighPowerSettings(State):
         self.device.reverse_button.set_color(Colors.RED, Brightness.DEFAULT)
         self.device.low_button.set_color(Colors.BLUE, Brightness.DIMMER)
         self.device.high_button.pulsate(
-            Colors.BLUE, Brightness.DIMMER, Colors.BLUE, Brightness.DEFAULT)
+            Colors.BLUE, Brightness.DIMMER, Colors.BLUE, Brightness.BRIGHTER)
 
     def on_exit(self, next_state):
         self.device.motor.stop()

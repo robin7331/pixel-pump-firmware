@@ -125,13 +125,15 @@ pixel_pump = PixelPump(motor=motor,
                        no_valve=no_valve,
                        three_way_valve=three_way_valve)
 
-# Lets render the buttons at 30 fps
-# uiTimer = Timer()
-# uiTimer.init(freq=30, mode=Timer.PERIODIC,
-#              callback=lambda t: renderer.flush_frame_buffer())
+# Lets render the buttons at 30 fps (just for the boot sequence)
+uiTimer = Timer()
+uiTimer.init(freq=30, mode=Timer.PERIODIC,
+             callback=lambda t: renderer.flush_frame_buffer())
 
 # Lets run a fancy rainbow boot sequence followed by a few relay clicks because we can
-# run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
+run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
+
+uiTimer.deinit()
 
 rendered_at = 0
 

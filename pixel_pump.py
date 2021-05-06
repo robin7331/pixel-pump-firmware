@@ -45,6 +45,12 @@ class PixelPump:
 
         self.settings_manager = SettingsManager()
         self.ui_renderer.brightness_modifier = self.settings_manager.get_brightness()
+        power_mode = self.settings_manager.get_power_mode()
+
+        self.set_power_mode(power_mode)
+        self.high_duty = self.settings_manager.get_high_pwm_duty()
+        self.low_duty = self.settings_manager.get_low_pwm_duty()
+
         mode = self.settings_manager.get_mode()
         if mode is 0:
             self.set_state(LiftState(self))
@@ -54,12 +60,6 @@ class PixelPump:
             self.set_state(ReverseState(self))
         else:
             self.set_state(LiftState(self))
-
-        power_mode = self.settings_manager.get_power_mode()
-        self.set_power_mode(power_mode)
-
-        self.high_duty = self.settings_manager.get_high_pwm_duty()
-        self.low_duty = self.settings_manager.get_low_pwm_duty()
 
     def in_state(self, state):
         return isinstance(self.state, state)

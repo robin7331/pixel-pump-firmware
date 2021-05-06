@@ -51,6 +51,9 @@ class PixelPump:
         self.high_duty = self.settings_manager.get_high_pwm_duty()
         self.low_duty = self.settings_manager.get_low_pwm_duty()
 
+        self.motor.on_timeout = lambda motor: self.state.on_motor_timeout(
+            motor)
+
         mode = self.settings_manager.get_mode()
         if mode is 0:
             self.set_state(LiftState(self))
@@ -140,6 +143,9 @@ class State:
                 self.device.set_state(HighPowerSettings(self.device))
         pass
 
+    def on_motor_timeout(self, motor):
+        pass
+
     def tick(self):
         pass
 
@@ -184,11 +190,17 @@ class LiftState(State):
         self.device.nc_valve.activate()
         self.device.nc_valve.deactivate(500)
 
+    def on_motor_timeout(self, motor):
+        self.device.trigger_button.pulsate(
+            Colors.NONE, Brightness.DEFAULT, Colors.GREEN, Brightness.DEFAULT)
+        self.device.motor.stop()
+        self.device.nc_valve.activate()
+        self.device.nc_valve.deactivate(500)
+
 
 class DropState(State):
     def __init__(self, device):
         super().__init__(device)
-        self.last_motor_start = 0
 
     def on_enter(self, previous_state):
         self.device.settings_manager.set_mode(1)
@@ -212,7 +224,6 @@ class DropState(State):
         self.device.motor.start()
         self.device.trigger_button.stop_pulsating()
         self.device.trigger_button.set_color(Colors.GREEN, Brightness.DEFAULT)
-        self.last_motor_start = utime.ticks_ms()
 
     def vent(self):
         self.device.nc_valve.activate()
@@ -247,11 +258,11 @@ class DropState(State):
         self.set_running()
         self.device.nc_valve.deactivate()
 
-    def tick(self):
-        if not self.paused and self.device.motor.running:
-            if (utime.ticks_ms() - self.last_motor_start) > 15000:
-                self.set_paused()
-                self.vent()
+    # Should not be reached since the motor timeout is at 30s and this state's timeout is at 15
+    # Added just in case we change the state or motor timeout to something else.
+    def on_motor_timeout(self, motor):
+        self.set_paused()
+        self.vent()
 
 
 class ReverseState(State):
@@ -415,6 +426,12 @@ class LowPowerSettings(State):
         self.device.settings_manager.set_low_pwm_duty(self.device.low_duty)
         self.device.set_last_state()
 
+    def on_motor_timeout(self, motor):
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.low_duty = self.old_duty
+        self.device.set_last_state()
+
 
 class HighPowerSettings(State):
     def __init__(self, device):
@@ -464,4 +481,10 @@ class HighPowerSettings(State):
         self.device.trigger_button.clear_color()
         self.device.reverse_button.clear_color()
         self.device.settings_manager.set_high_pwm_duty(self.device.high_duty)
+        self.device.set_last_state()
+
+    def on_motor_timeout(self, motor):
+        self.device.trigger_button.clear_color()
+        self.device.reverse_button.clear_color()
+        self.device.high_duty = self.old_duty
         self.device.set_last_state()

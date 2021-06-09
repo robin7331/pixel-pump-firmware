@@ -36,7 +36,7 @@ class UIRenderer:
         # Create the StateMachine with the ws2812 program.
         # Its running at 8MHz so it has 10 clock cycles and outputs data with 800kHz just as the WS2812 spec says.
         self.state_machine = rp2.StateMachine(
-            0, ws2812, freq=8_000_000, sideset_base=Pin(26))
+            0, ws2812, freq=8_000_000, sideset_base=Pin(14))
 
         # Activate the state machine
         self.state_machine.active(1)

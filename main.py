@@ -9,9 +9,9 @@ from boot_sequence import run_boot_sequence
 from motor import Motor
 import utime
 
-foot_aux = Pin(19, Pin.IN, Pin.PULL_DOWN)
+foot_aux = Pin(7, Pin.IN, Pin.PULL_DOWN)
 
-motor = Motor(motorPin=20)
+motor = Motor(motorPin=5)
 
 # The UI Renderer class holds the frame buffer and the PIO state machine
 renderer = UIRenderer()
@@ -63,7 +63,7 @@ def renderBtn(btn):
 lift_button = Button(title='Lift',
                      left_led_index=0,
                      right_led_index=1,
-                     switch_pin=16,
+                     switch_pin=8,
                      on_button_event=on_button_event,
                      on_touch_down=liftBtnTouchUp,
                      on_long_press=liftBtnLongPress,
@@ -72,7 +72,7 @@ lift_button = Button(title='Lift',
 drop_button = Button(title='Drop',
                      left_led_index=2,
                      right_led_index=3,
-                     switch_pin=13,
+                     switch_pin=9,
                      on_button_event=on_button_event,
                      on_touch_down=dropBtnTouchUp,
                      on_should_render=renderBtn)
@@ -80,21 +80,21 @@ drop_button = Button(title='Drop',
 low_button = Button(title='Low',
                     left_led_index=4,
                     right_led_index=5,
-                    switch_pin=14,
+                    switch_pin=11,
                     on_button_event=on_button_event,
                     on_should_render=renderBtn)
 
 high_button = Button(title='High',
                      left_led_index=6,
                      right_led_index=7,
-                     switch_pin=28,
+                     switch_pin=10,
                      on_button_event=on_button_event,
                      on_should_render=renderBtn)
 
 reverse_button = Button(title='Reverse',
                         left_led_index=8,
                         right_led_index=9,
-                        switch_pin=27,
+                        switch_pin=12,
                         on_button_event=on_button_event,
                         on_touch_down=reverse_buttonTouchDown,
                         on_should_render=renderBtn)
@@ -102,16 +102,16 @@ reverse_button = Button(title='Reverse',
 trigger_button = Button(title='Trigger',
                         left_led_index=10,
                         right_led_index=11,
-                        switch_pin=17,
-                        secondary_switch_pin=18,
+                        switch_pin=13,
+                        secondary_switch_pin=6,
                         on_button_event=on_button_event,
                         on_touch_up=trigger_buttonTouchUp,
                         on_touch_down=trigger_buttonTouchDown,
                         on_should_render=renderBtn)
 
-no_valve = Valve(15)
-nc_valve = Valve(22)
-three_way_valve = Valve(21)
+no_valve = Valve(2)
+nc_valve = Valve(3)
+three_way_valve = Valve(4)
 
 pixel_pump = PixelPump(motor=motor,
                        ui_renderer=renderer,

@@ -132,8 +132,6 @@ uiTimer.init(freq=30, mode=Timer.PERIODIC,
 
 # Lets run a fancy rainbow boot sequence followed by a few relay clicks because we can
 run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
-run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
-run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
 
 uiTimer.deinit()
 

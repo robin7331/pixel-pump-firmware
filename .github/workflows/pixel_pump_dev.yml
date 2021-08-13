@@ -27,14 +27,14 @@ jobs:
         cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/rp2/modules/
     - name: Build Pixel Pump firmware
       run: cd $GITHUB_WORKSPACE/micropython/ports/rp2 && make && ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
-    - uses: "marvinpinto/action-automatic-releases@latest"
-        with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          automatic_release_tag: "latest"
-          prerelease: true
-          title: "Pixel Pump Dev Build"
-          files: |
-            micropython/ports/rp2/build-PICO/firmware.uf2
+    - uses: marvinpinto/action-automatic-releases@latest
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "latest"
+        prerelease: true
+        title: "Pixel Pump Dev Build"
+        files: |
+          micropython/ports/rp2/build-PICO/firmware.uf2
     # - name: Rename firmware
     #   if: startsWith(github.ref, 'refs/tags/')
     #   run: mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/pixel-pump-prerelease-vX.X.X.uf2

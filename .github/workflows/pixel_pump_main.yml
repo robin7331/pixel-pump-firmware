@@ -4,9 +4,8 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 jobs:
   build:
@@ -30,15 +29,14 @@ jobs:
         cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/rp2/modules/
     - name: Build Pixel Pump firmware
       run: cd $GITHUB_WORKSPACE/micropython/ports/rp2 && make && ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
-    - name: Rename firmware
-      if: startsWith(github.ref, 'refs/tags/')
-      run: mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/pixel-pump-vX.X.X.uf2
-    - name: Release
-      uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
+    - uses: marvinpinto/action-automatic-releases@latest
+      name: Release
       with:
-        files: micropython/ports/rp2/build-PICO/pixel-pump-vX.X.X.uf2
-        draft: true
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        prerelease: false
+        title: "Pixel Pump Release Build"
+        files: |
+          micropython/ports/rp2/build-PICO/firmware.uf2
 
 
 

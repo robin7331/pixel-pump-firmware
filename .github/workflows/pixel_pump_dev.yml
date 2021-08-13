@@ -28,6 +28,7 @@ jobs:
     - name: Build Pixel Pump firmware
       run: cd $GITHUB_WORKSPACE/micropython/ports/rp2 && make && ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
     - uses: marvinpinto/action-automatic-releases@latest
+      name: Release
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
         automatic_release_tag: "latest"

@@ -28,11 +28,11 @@ jobs:
     - name: Build Pixel Pump firmware
       run: cd $GITHUB_WORKSPACE/micropython/ports/rp2 && make && ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
     - name: Rename firmware
-      run: mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2
+      run: mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/pixel-pump-vX.X.X.uf2
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
-        files: micropython/ports/rp2/build-PICO/firmware.uf2
+        files: micropython/ports/rp2/build-PICO/pixel-pump-vX.X.X.uf2
         draft: true
 
 

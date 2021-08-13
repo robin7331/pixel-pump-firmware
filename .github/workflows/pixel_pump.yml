@@ -1,7 +1,9 @@
-name: pixel pump
+name: Pixel Pump
 
 on:
   push:
+    tags:
+      - "v*.*.*"
 
 jobs:
   build:
@@ -11,7 +13,25 @@ jobs:
     - uses: actions/checkout@v2
       with:
         repository: robin7331/micropython
+        path: './micropython'
+    - name: Update apt-get
+      run: sudo apt-get update
     - name: Install packages
-      run: source tools/ci.sh && ci_pixel_pump_setup
-    - name: Build
-      run: source tools/ci.sh && ci_pixel_pump_build
+      run: sudo apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential cmake git -y
+    - name: Initialize MP submodules
+      run: cd $GITHUB_WORKSPACE/micropython && git submodule update --init lib/pico-sdk lib/tinyusb
+    - name: Build mpy-cross
+      run: cd $GITHUB_WORKSPACE/micropython/mpy-cross && make
+    - name: Copy pixel pump firmware to micropython rp2 modules
+      run: |
+        cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/rp2/modules/
+    - name: Build Pixel Pump firmware
+      run: cd $GITHUB_WORKSPACE/micropython/ports/rp2 && make && ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2
+        draft: true
+
+
+

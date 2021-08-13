@@ -1,2 +1,4 @@
 /.vscode
 /pico-go.json
+/micropython
+/workflow

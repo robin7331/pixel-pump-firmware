@@ -1,0 +1,44 @@
+name: Pixel Pump
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/checkout@v2
+      with:
+        repository: robin7331/micropython
+        path: './micropython'
+    - name: Update apt-get
+      run: sudo apt-get update
+    - name: Install packages
+      run: sudo apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential cmake git -y
+    - name: Initialize MP submodules
+      run: cd $GITHUB_WORKSPACE/micropython && git submodule update --init lib/pico-sdk lib/tinyusb
+    - name: Build mpy-cross
+      run: cd $GITHUB_WORKSPACE/micropython/mpy-cross && make
+    - name: Copy Pixel Pump firmware to micropython rp2 modules
+      run: |
+        cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/rp2/modules/
+    - name: Build Pixel Pump firmware
+      run: cd $GITHUB_WORKSPACE/micropython/ports/rp2 && make && ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
+    - name: Rename firmware
+      if: startsWith(github.ref, 'refs/tags/')
+      run: mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/pixel-pump-vX.X.X.uf2
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: micropython/ports/rp2/build-PICO/pixel-pump-vX.X.X.uf2
+        draft: true
+
+
+

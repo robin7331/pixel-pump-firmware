@@ -22,15 +22,17 @@ jobs:
       run: cd $GITHUB_WORKSPACE/micropython && git submodule update --init lib/pico-sdk lib/tinyusb
     - name: Build mpy-cross
       run: cd $GITHUB_WORKSPACE/micropython/mpy-cross && make
-    - name: Copy pixel pump firmware to micropython rp2 modules
+    - name: Copy Pixel Pump firmware to micropython rp2 modules
       run: |
         cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/rp2/modules/
     - name: Build Pixel Pump firmware
       run: cd $GITHUB_WORKSPACE/micropython/ports/rp2 && make && ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
+    - name: Rename firmware
+      run: mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
-        files: $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2
+        files: micropython/ports/rp2/build-PICO/firmware.uf2
         draft: true
 
 

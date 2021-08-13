@@ -2,8 +2,6 @@ name: Pixel Pump Main
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
 

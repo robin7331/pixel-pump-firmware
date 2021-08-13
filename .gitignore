@@ -2,3 +2,4 @@
 /pico-go.json
 /micropython
 /workflow
+__pycache__

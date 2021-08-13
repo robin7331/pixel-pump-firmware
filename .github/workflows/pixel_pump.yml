@@ -1,0 +1,17 @@
+name: pixel pump
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/checkout@v2
+      with:
+        repository: robin7331/micropython
+    - name: Install packages
+      run: source tools/ci.sh && ci_pixel_pump_setup
+    - name: Build
+      run: source tools/ci.sh && ci_pixel_pump_build

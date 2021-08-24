@@ -32,7 +32,7 @@ jobs:
     - name: Copy Pixel Pump firmware to micropython pixelpump port modules
       run: |
         cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/pixelpump/modules/
-    - name: Build blank MicroPython firmware (without Pixel Pump files)
+    - name: Build MicroPython firmware
       run: |
         cd $GITHUB_WORKSPACE/micropython/ports/pixelpump
         make

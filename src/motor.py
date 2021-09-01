@@ -2,7 +2,7 @@ from machine import Pin, PWM
 import utime
 
 class Motor:
-    def __init__(self, motorPin, freq=10000, timeout=30000, on_timeout=None):
+    def __init__(self, motorPin, freq=10000, timeout=300000, on_timeout=None):
         self.pwm = PWM(Pin(motorPin))
         self.pwm.freq(freq)
         self.pwm_duty = 0

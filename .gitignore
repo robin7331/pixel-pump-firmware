@@ -2,4 +2,5 @@
 /pico-go.json
 /micropython
 /workflow
+.secrets
 __pycache__

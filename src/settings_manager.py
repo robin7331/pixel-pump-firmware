@@ -41,7 +41,7 @@ class SettingsManager:
         return self.settings[property]
 
     def get_brightness(self):
-        return self.get_property('brightness', default=0.5)
+        return self.get_property('brightness', default=1.0)
 
     def set_brightness(self, brightness, persist=True):
         if brightness > 0.8:

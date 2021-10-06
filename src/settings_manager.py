@@ -41,7 +41,7 @@ class SettingsManager:
         return self.settings[property]
 
     def get_brightness(self):
-        return self.get_property('brightness', default=0.5)
+        return self.get_property('brightness', default=1.0)
 
     def set_brightness(self, brightness, persist=True):
         if brightness > 0.8:
@@ -71,7 +71,7 @@ class SettingsManager:
         self.set_property('high_pwm_duty', duty, persist)
 
     def get_power_mode(self):
-        return self.get_property('power_mode', default=0)
+        return self.get_property('power_mode', default=1)
 
     def set_power_mode(self, power_mode, persist=True):
         self.set_property('power_mode', power_mode, persist)

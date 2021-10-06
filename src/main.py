@@ -2,12 +2,16 @@
 from machine import Pin, PWM
 from ui_renderer import UIRenderer
 from machine import Timer
+from io_event_source import IOEventSource, IOEvent
 from button import Button
 from valve import Valve
 from pixel_pump import PixelPump, PowerMode
 from boot_sequence import run_boot_sequence
 from motor import Motor
 import utime
+import hid
+
+
 
 foot_aux = Pin(7, Pin.IN, Pin.PULL_DOWN)
 
@@ -51,6 +55,11 @@ def on_button_event(btn, event):
     global pixel_pump
     pixel_pump.state.on_button_event(btn, event)
 
+def on_event(source, event):
+    if event is IOEvent.TAPPED:
+        hid.Send("n")
+    if event is IOEvent.LONG_HOLD:
+        hid.Send("UP")
 
 def renderBtn(btn):
     global renderer
@@ -109,6 +118,8 @@ trigger_button = Button(title='Trigger',
                         on_touch_down=trigger_buttonTouchDown,
                         on_should_render=renderBtn)
 
+secondary_pedal = IOEventSource(title='Secondary Trigger', pin_number=7, pin_mode=Pin.IN, pin_pull=Pin.PULL_DOWN, on_event=on_event)
+
 no_valve = Valve(2)
 nc_valve = Valve(3)
 three_way_valve = Valve(4)
@@ -144,6 +155,8 @@ while True:
     high_button.tick()
     reverse_button.tick()
     trigger_button.tick()
+
+    secondary_pedal.tick()
 
     no_valve.tick()
     nc_valve.tick()

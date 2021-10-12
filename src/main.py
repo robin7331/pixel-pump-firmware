@@ -1,4 +1,5 @@
 
+import machine
 from machine import Pin, PWM
 from ui_renderer import UIRenderer
 from machine import Timer
@@ -11,7 +12,7 @@ from motor import Motor
 import utime
 import hid
 
-
+machine.freq(96000000)
 
 foot_aux = Pin(7, Pin.IN, Pin.PULL_DOWN)
 

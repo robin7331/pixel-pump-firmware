@@ -12,7 +12,7 @@ from motor import Motor
 import utime
 import hid
 
-machine.freq(96000000)
+machine.freq(72000000)
 
 foot_aux = Pin(7, Pin.IN, Pin.PULL_DOWN)
 

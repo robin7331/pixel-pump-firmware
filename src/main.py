@@ -1,6 +1,5 @@
-
 import machine
-from machine import Pin, PWM
+from machine import Pin, PWM, mem32
 from ui_renderer import UIRenderer
 from machine import Timer
 from io_event_source import IOEventSource, IOEvent
@@ -12,7 +11,164 @@ from motor import Motor
 import utime
 import hid
 
-machine.freq(72000000)
+# Register Base Addresses
+
+SYSCFG_BASE         = 0x40004000
+IO_BANK0_BASE       = 0x40014000
+PADS_BANK0_BASE     = 0x4001C000
+PADS_QSPI_BASE      = 0x40020000
+DMA_BASE            = 0x50000000
+SIO_BASE            = 0xD0000000
+
+# GPIO control
+
+GPIO_IN             = SIO_BASE + 0x004
+
+GPIO_OUT            = SIO_BASE + 0x010
+GPIO_OUT_SET        = SIO_BASE + 0x014
+GPIO_OUT_CLR        = SIO_BASE + 0x018
+GPIO_OUT_XOR        = SIO_BASE + 0x01C
+
+GPIO_OE             = SIO_BASE + 0x020
+GPIO_OE_SET         = SIO_BASE + 0x024
+GPIO_OE_CLR         = SIO_BASE + 0x028
+GPIO_OE_XOR         = SIO_BASE + 0x02C
+
+# QSPI bus - SD3, SD2, SD1, SD0, SSn, SSCLK (lsb)
+
+QSPI_IN             = SIO_BASE + 0x008
+
+QSPI_OUT            = SIO_BASE + 0x030
+QSPI_OUT_SET        = SIO_BASE + 0x034
+QSPI_OUT_CLR        = SIO_BASE + 0x038
+QSPI_OUT_XOR        = SIO_BASE + 0x03C
+
+QSPI_OE             = SIO_BASE + 0x040
+QSPI_OE_SET         = SIO_BASE + 0x044
+QSPI_OE_CLR         = SIO_BASE + 0x048
+QSPI_OE_XOR         = SIO_BASE + 0x04C
+
+# Processor ID
+
+CPUID               = SIO_BASE + 0x000
+
+# Inter-core FIFO - 8 words deep
+
+FIFO_ST             = SIO_BASE + 0x050 # Status
+FIFO_WR             = SIO_BASE + 0x054
+FIFO_RD             = SIO_BASE + 0x058
+
+FIFO_ST_ROE_BIT     = 3 # Was read when empty - 1=Yes (sticky)
+FIFO_ST_WOF_BIT     = 2 # Was write when full - 1=Yes (sticky)
+FIFO_ST_RDY_BIT     = 1 # Can write to fIFO   - 1=Yes
+FIFO_ST_VLD_BIT     = 0 # Can read from FIFO  - 1=Yes
+
+# Spin locks - Read to claim (0=fail), Write to release
+
+SPINLOCK            = SIO_BASE + 0x100 # Add (lock * 4)
+SPINLOCK_MPY        = 4
+
+SPINLOCK_STATUS     = SIO_BASE + 0x05C # All 32 spin locks as bits
+
+# GPIO configuration
+
+GPIO_CTRL           = IO_BANK0_BASE + 0x04 # Add (pin * 8)
+GPIO_CTRL_MPY       = 8
+
+GPIO_IRQOVER_BITS   = 28 # 00-11         Default=0
+GPIO_INOVER_BITS    = 16 # 00-11         Default=0
+GPIO_OEOVER_BITS    = 12 # 00-11         Default=0
+GPIO_OUTOVER_BITS   =  8 # 00-11         Default=0
+GPIO_ALT_BITS       =  0 # 00000-11111   Default=31 (11111)
+
+GPIO_ALT_SPI_VAL    = 1
+GPIO_ALT_UART_VAL   = 2
+GPIO_ALT_I2C_VAL    = 3
+GPIO_ALT_PWM_VAL    = 4
+GPIO_ALT_SIO_VAL    = 5
+GPIO_ALT_PIO0_VAL   = 6
+GPIO_ALT_PIO1_VAL   = 7
+GPIO_ALT_USB_VAL    = 9
+GPIO_ALT_NONE_VAL   = 31
+
+GPIO_SYNC_BYPASS    = SYSCFG_BASE + 0x0C # 1=Bypass input sync for that pin
+
+# Debug configuration
+
+DBGFORCE            = SYSCFG_BASE + 0x14
+
+PROC1_ATTACH_BIT    = 7 # 0=Hardware, 1=Software, Disconnect CPU1 from pads   Default=0
+PROC1_SWDCLK_BIT    = 6 # Drive SWCLK input to CPU1                           Default=1
+PROC1_SWDI_BIT      = 5 # Drive SWDIO input to CPU1                           Default=1
+PROC1_SWDO_BIT      = 4 # Read SWDIO output from CPU1
+PROC0_ATTACH_BIT    = 3 # 0=Hardware, 1=Software, Disconnect CPU0 from pads   Default=0
+PROC0_SWDCLK_BIT    = 2 # Drive SWCLK input to CPU0                           Default=1
+PROC0_SWDI_BIT      = 1 # Drive SWDIO input to CPU0                           Default=1
+PROC0_SWDO_BIT      = 0 # Read SWDIO output from CPU0
+
+DBGFORCE_HARDWARE   = 0b_0110_0110
+DBGFORCE_SOFTWARE   = 0b_1110_1110
+
+# GPIO Pad Control
+
+PAD_GPIO_VOLTAGE    = PADS_BANK0_BASE + 0x00 # 0 or 1 - covers all pins
+
+PAD_GPIO            = PADS_BANK0_BASE + 0x04 # Add (pin * 4)
+PAD_GPIO_MPY        = 4
+
+PAD_GPIO_SWC        = PADS_BANK0_BASE + 0x7C
+PAD_GPIO_SWD        = PADS_BANK0_BASE + 0x80
+
+PAD_QSPI_VOLTAGE    = PADS_QSPI_BASE  + 0x00 # 0 or 1 - covers all pins
+
+PAD_QSPI            = PADS_QSPI_BASE  + 0x04 # Add (pin * 4)
+PAD_QSPI_MPY        = 4
+
+PAD_QSPI_SCLK       = PADS_QSPI_BASE  + 0x04
+PAD_QSPI_SD0        = PADS_QSPI_BASE  + 0x08
+PAD_QSPI_SD1        = PADS_QSPI_BASE  + 0x0C
+PAD_QSPI_SD2        = PADS_QSPI_BASE  + 0x10
+PAD_QSPI_SD3        = PADS_QSPI_BASE  + 0x14
+PAD_QSPI_SS         = PADS_QSPI_BASE  + 0x18
+
+PAD_VOLTAGE_BIT     = 0 # 0=3V3, 1=1V8                  Default=0, 3V3
+
+PAD_OD_BIT          = 7 # 0=Enable, 1=Disable           Default=0, Output enabled
+PAD_IE_BIT          = 6 # 0=Disable, 1=Enable           Default=1, Input Enabled
+PAD_DRIVE_BITS      = 4 # 0=2mA, 1=4mA, 2=8mA, 3=12mA   Default=1, 4mA drive
+PAD_PUE_BIT         = 3 # 0=Disable, 1=Enable           Default=0, No pull-up
+PAD_PDE_BIT         = 2 # 0=Disable, 1=Enable           Default=1, Pull-down enabled
+PAD_SCMITT_BIT      = 1 # 0=Disable, 1=Enable           Default=1, Scmitt enabled
+PAD_SLEW_BIT        = 0 # 0=Slow, 1=Fast                Default=0, Slew rate slow
+# DMA
+
+DMA_RD_ADDRESS      = DMA_BASE + 0x00 # Add (channel * 0x40)
+DMA_WR_ADDRESS      = DMA_BASE + 0x04 # Add (channel * 0x40)
+DMA_COUNT           = DMA_BASE + 0x08 # Add (channel * 0x40)
+DMA_TRIGGER         = DMA_BASE + 0x0C # Add (channel * 0x40)
+
+DMA_CHAN_MPY        = 0x40
+
+DMA_IRQ_QUIET_BIT   = 21
+DMA_TREQ_SEL_BITS   = 15
+DMA_CHAIN_TO_BITS   = 11
+DMA_RING_SEL_BIT    = 10
+DMA_RING_SIZE_BIT   =  9
+DMA_INCR_WRITE_BIT  =  5
+DMA_INCR_READ_BIT   =  4
+DMA_DATA_SIZE_BITS  =  2
+DMA_PRIORITY_BIT    =  1
+DMA_ENABLE_BIT      =  0
+
+DMA_TREQ_AUTO_VAL   = 0x3F # Immediately run
+DMA_TREQ_RX_VAL     = 0x04 # Get from PIO
+DMA_TREQ_TX_VAL     = 0x00 # Put to PIO
+
+DMA_TREQ_COPY_VAL   = DMA_TREQ_AUTO_VAL # Immediately run
+DMA_TREQ_GET_VAL    = DMA_TREQ_RX_VAL   # Get from PIO
+DMA_TREQ_PUT_VAL    = DMA_TREQ_TX_VAL   # Put to PIO
+
+machine.freq(96000000)
 
 foot_aux = Pin(7, Pin.IN, Pin.PULL_DOWN)
 
@@ -21,6 +177,19 @@ motor = Motor(motorPin=5)
 # The UI Renderer class holds the frame buffer and the PIO state machine
 renderer = UIRenderer()
 
+def SetPadQSPI(pin, d, s):
+    adr = PAD_QSPI + PAD_QSPI_MPY * pin
+    n = mem32[adr]
+    n = n | ( 3 << PAD_DRIVE_BITS ) # Set drive bits high
+    n = n ^ ( 3 << PAD_DRIVE_BITS ) # Invert drive bits; set drive bits low
+    n = n | ( d << PAD_DRIVE_BITS ) # Add drive bits
+    n = n | ( 1 << PAD_SLEW_BIT   ) # Set slew high
+    n = n ^ ( 1 << PAD_SLEW_BIT   ) # Invert slew bit; set slew low
+    n = n | ( s << PAD_SLEW_BIT   ) # Add slew bit
+    mem32[adr] = n
+
+for pin in range(6):
+    SetPadQSPI(pin, 0, 0) # Drive = 0 (2mA), Slew = 0 (slow)
 
 def liftBtnTouchUp(btn):
     global pixel_pump

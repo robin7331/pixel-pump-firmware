@@ -44,6 +44,7 @@ jobs:
         prerelease: true
         draft: true
         title: "Pixel Pump Dev Build"
+        automatic_release_tag: false
         files: |
           micropython/ports/rp2/build-PICO/firmware.uf2
           micropython/ports/rp2/build-PICO/firmware-blank.uf2

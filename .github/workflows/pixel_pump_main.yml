@@ -44,8 +44,8 @@ jobs:
         prerelease: false
         title: "Pixel Pump Release Build"
         files: |
-          micropython/ports/pixelpump/build-PICO/firmware.uf2
-          micropython/ports/pixelpump/build-PICO/firmware-blank.uf2
+          micropython/ports/rp2/build-PICO/firmware.uf2
+          micropython/ports/rp2/build-PICO/firmware-blank.uf2
 
 
 

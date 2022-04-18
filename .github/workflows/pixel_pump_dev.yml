@@ -12,9 +12,9 @@ jobs:
     - uses: actions/checkout@v2
     - uses: actions/checkout@v2
       with:
-        repository: robin7331/micropython
+        repository: robin7331/pixel-pump-micropython
         path: './micropython'
-        ref: 'pixelpump'
+        ref: 'pixel-pump-dev'
     - name: Update apt-get
       run: sudo apt-get update
     - name: Install packages
@@ -25,18 +25,18 @@ jobs:
       run: cd $GITHUB_WORKSPACE/micropython/mpy-cross && make
     - name: Build blank MicroPython firmware (without Pixel Pump files)
       run: |
-        cd $GITHUB_WORKSPACE/micropython/ports/pixelpump
+        cd $GITHUB_WORKSPACE/micropython/ports/rp2
         make
-        ls -l $GITHUB_WORKSPACE/micropython/ports/pixelpump/build-PICO
-        mv $GITHUB_WORKSPACE/micropython/ports/pixelpump/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/pixelpump/build-PICO/firmware-blank.uf2 
+        ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
+        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware-blank.uf2 
     - name: Copy Pixel Pump firmware to micropython pixelpump port modules
       run: |
-        cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/pixelpump/modules/
+        cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/rp2/modules/
     - name: Build MicroPython firmware
       run: |
-        cd $GITHUB_WORKSPACE/micropython/ports/pixelpump
+        cd $GITHUB_WORKSPACE/micropython/ports/rp2
         make
-        ls -l $GITHUB_WORKSPACE/micropython/ports/pixelpump/build-PICO
+        ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
     - uses: marvinpinto/action-automatic-releases@latest
       name: Release
       with:
@@ -45,8 +45,8 @@ jobs:
         prerelease: true
         title: "Pixel Pump Dev Build"
         files: |
-          micropython/ports/pixelpump/build-PICO/firmware.uf2
-          micropython/ports/pixelpump/build-PICO/firmware-blank.uf2
+          micropython/ports/rp2/build-PICO/firmware.uf2
+          micropython/ports/rp2/build-PICO/firmware-blank.uf2
 
 
 

@@ -41,8 +41,8 @@ jobs:
       name: Release
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        automatic_release_tag: "latest"
         prerelease: true
+        draft: true
         title: "Pixel Pump Dev Build"
         files: |
           micropython/ports/rp2/build-PICO/firmware.uf2

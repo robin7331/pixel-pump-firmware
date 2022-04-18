@@ -9,7 +9,7 @@ from pixel_pump import PixelPump, PowerMode
 from boot_sequence import run_boot_sequence
 from motor import Motor
 import utime
-import hid
+import keyboard
 
 # Register Base Addresses
 
@@ -226,10 +226,13 @@ def on_button_event(btn, event):
     pixel_pump.state.on_button_event(btn, event)
 
 def on_event(source, event):
+    # https://deskthority.net/wiki/Scancode for keyboard codes
     if event is IOEvent.TAPPED:
-        hid.Send("n")
+        k.press(0x11)
+        k.release(0x11)
     if event is IOEvent.LONG_HOLD:
-        hid.Send("UP")
+        k.press(0x52)
+        k.release(0x52)
 
 def renderBtn(btn):
     global renderer
@@ -317,6 +320,8 @@ run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
 uiTimer.deinit()
 
 rendered_at = 0
+
+k = keyboard.Keyboard()
 
 while True:
     lift_button.tick()

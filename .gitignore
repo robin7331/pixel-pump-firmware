@@ -3,4 +3,5 @@
 /micropython
 /workflow
 .secrets
+settings.json
 __pycache__

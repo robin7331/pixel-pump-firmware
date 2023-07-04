@@ -1,4 +1,4 @@
-name: Pixel Pump Dev
+name: Pixel Pump Local
 
 on:
   push:
@@ -6,10 +6,12 @@ on:
       - dev
 
 jobs:
-  dev-build:
+  local-dev-build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+      with:
+        path: "pixel-pump-firmware"
     - uses: actions/checkout@v2
       with:
         repository: micropython/micropython
@@ -41,17 +43,6 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD=PICO
-    - uses: marvinpinto/action-automatic-releases@latest
-      name: Release
-      with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        prerelease: true
-        draft: true
-        title: "Pixel Pump Dev Build"
-        automatic_release_tag: latest
-        files: |
-          micropython/ports/rp2/build-PICO/firmware.uf2
-          micropython/ports/rp2/build-PICO/firmware-blank.uf2
 
 
 

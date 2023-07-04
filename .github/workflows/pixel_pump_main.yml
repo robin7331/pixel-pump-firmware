@@ -6,37 +6,41 @@ on:
       - "v*"
 
 jobs:
-  release-build:
+  dev-build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
     - uses: actions/checkout@v2
       with:
-        repository: robin7331/pixel-pump-micropython
-        path: './micropython'
-        ref: 'pixel-pump-main'
+        repository: micropython/micropython
+        ref: '7f143444283528101d9b48e1f2e908c12648f2f1' # https://github.com/noobee/micropython/commits/usb-hid
+        path: "./micropython"
     - name: Update apt-get
       run: sudo apt-get update
     - name: Install packages
       run: sudo apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential cmake git -y
-    - name: Initialize MP submodules
-      run: cd $GITHUB_WORKSPACE/micropython && git submodule update --init lib/pico-sdk lib/tinyusb
-    - name: Build mpy-cross
-      run: cd $GITHUB_WORKSPACE/micropython/mpy-cross && make
-    - name: Build blank MicroPython firmware (without Pixel Pump files)
+    - name: Apply HID fix
       run: |
-        cd $GITHUB_WORKSPACE/micropython/ports/rp2
-        make
-        ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
-        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware-blank.uf2 
-    - name: Copy Pixel Pump firmware to micropython pixelpump port modules
+        cp -r $GITHUB_WORKSPACE/drivers/. $GITHUB_WORKSPACE/micropython/drivers/
+        cp $GITHUB_WORKSPACE/ports/rp2/CMakeLists.txt $GITHUB_WORKSPACE/micropython/ports/rp2/
+        cp $GITHUB_WORKSPACE/ports/rp2/modusb_hid.c $GITHUB_WORKSPACE/micropython/ports/rp2/
+        cp $GITHUB_WORKSPACE/ports/rp2/mpconfigport.h $GITHUB_WORKSPACE/micropython/ports/rp2/
+        cp $GITHUB_WORKSPACE/ports/rp2/tusb_config.h $GITHUB_WORKSPACE/micropython/ports/rp2/
+        cp $GITHUB_WORKSPACE/ports/rp2/tusb_port.c $GITHUB_WORKSPACE/micropython/ports/rp2/
+    - name: Build blank MicroPython firmware (without Pixel Pump files)
+      run: | 
+        cd $GITHUB_WORKSPACE/micropython/
+        make -C mpy-cross
+        git submodule update --init lib/pico-sdk lib/tinyusb
+        make -C ports/rp2 BOARD=PICO
+        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware-blank.uf2
+    - name: Copy Pixel Pump firmware to MicroPython
       run: |
         cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/rp2/modules/
-    - name: Build MicroPython firmware
+    - name: Build Pixel Pump Firmware
       run: |
-        cd $GITHUB_WORKSPACE/micropython/ports/rp2
-        make
-        ls -l $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO
+        cd $GITHUB_WORKSPACE/micropython/
+        make -C ports/rp2 BOARD=PICO
     - uses: marvinpinto/action-automatic-releases@latest
       name: Release
       with:

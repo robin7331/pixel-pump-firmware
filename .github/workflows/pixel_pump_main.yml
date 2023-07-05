@@ -34,6 +34,9 @@ jobs:
         git submodule update --init lib/pico-sdk lib/tinyusb
         make -C ports/rp2 BOARD=PICO
         mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware-blank.uf2
+    - name: Generate Version File
+      run: |
+        python3 $GITHUB_WORKSPACE/tools/generateVersionFile.py --output $GITHUB_WORKSPACE/src/version.py
     - name: Copy Pixel Pump firmware to MicroPython
       run: |
         cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/rp2/modules/

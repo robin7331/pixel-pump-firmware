@@ -3,15 +3,29 @@ import subprocess
 import re
 from datetime import datetime, timezone
 
+def get_latest_version_tag(repo_path):
+    git_process = subprocess.Popen(['git', '-C', repo_path, 'tag', '--list', 'v*'], stdout=subprocess.PIPE)
+    tags = git_process.communicate()[0].decode().strip().split('\n')
+    version_tags = [tag for tag in tags if tag.startswith('v')]
+    if not version_tags:
+        return None
+    latest_tag = max(version_tags)
+    return latest_tag
+
+
 def get_git_info(repo_path):    
+    
     # Note: git describe doesn't work if no tag is available
     try:
-        tag = subprocess.check_output(['git', 'describe', '--tags', '--abbrev=0'], cwd=repo_path).decode().strip()
+        tag = subprocess.check_output(['git', 'describe', '--tags', '--abbrev=0', 'HEAD'], cwd=repo_path).decode().strip()
     except subprocess.CalledProcessError as er:
         tag = ""
     
     try:
-      latest_version_tag = subprocess.check_output(['git', 'describe', '--tags', '--match="v[0-9]*"', '--abbrev=0'], cwd=repo_path).decode().strip()
+      # Get the latest version tag or "" if no tag is available
+      latest_version_tag = get_latest_version_tag(repo_path)
+      if latest_version_tag is None:
+          latest_version_tag = ""
     except subprocess.CalledProcessError as er:
       latest_version_tag = ""
 

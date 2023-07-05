@@ -157,8 +157,8 @@ static const uint8_t usbd_desc_cfg[USBD_DESC_LEN] = {
 };
 
 static const char *const usbd_desc_str[] = {
-    [USBD_STR_MANUF] = "MicroPython",
-    [USBD_STR_PRODUCT] = "Board in FS mode",
+    [USBD_STR_MANUF] = "Robins Tools",
+    [USBD_STR_PRODUCT] = "Pixel Pump",
     [USBD_STR_SERIAL] = NULL, // generated dynamically
     [USBD_STR_CDC] = "Board CDC",
     [USBD_STR_HID] = "Board HID",

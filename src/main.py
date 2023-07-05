@@ -10,6 +10,10 @@ from boot_sequence import run_boot_sequence
 from motor import Motor
 import utime
 import keyboard
+from machine import UART, Pin
+import uselect
+import sys
+import version
 
 # Register Base Addresses
 
@@ -176,7 +180,6 @@ motor = Motor(motorPin=5)
 
 # The UI Renderer class holds the frame buffer and the PIO state machine
 renderer = UIRenderer()
-
 def SetPadQSPI(pin, d, s):
     adr = PAD_QSPI + PAD_QSPI_MPY * pin
     n = mem32[adr]
@@ -315,7 +318,7 @@ uiTimer.init(freq=30, mode=Timer.PERIODIC,
              callback=lambda t: renderer.flush_frame_buffer())
 
 # Lets run a fancy rainbow boot sequence followed by a few relay clicks because we can
-run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
+# run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
 
 uiTimer.deinit()
 
@@ -323,7 +326,9 @@ rendered_at = 0
 
 k = keyboard.Keyboard()
 
-while True:
+run = True
+
+while run:
     lift_button.tick()
     drop_button.tick()
     low_button.tick()
@@ -340,6 +345,20 @@ while True:
     motor.tick()
 
     pixel_pump.tick()
+
+    list = uselect.select([sys.stdin], [], [], 0.01)
+    if list[0]:
+        # Read entire line from stdin
+        line = sys.stdin.readline()
+        line = line.strip()
+        if line == "trigger:1":
+            pixel_pump.state.trigger_on()
+        if line == "trigger:0":
+            pixel_pump.state.trigger_off()
+        if line == "version":
+            print(version.VERSION_STRING)
+        if line == "halt":
+            run = False
 
     # Render the UI at 30 FPS.
     if utime.ticks_ms() - rendered_at > 33:

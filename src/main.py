@@ -314,7 +314,7 @@ pixel_pump = PixelPump(motor=motor,
 
 # Lets render the buttons at 30 fps (just for the boot sequence)
 uiTimer = Timer()
-uiTimer.init(freq=30, mode=Timer.PERIODIC,
+uiTimer.init(freq=60, mode=Timer.PERIODIC,
              callback=lambda t: renderer.flush_frame_buffer())
 
 # Lets run a fancy rainbow boot sequence followed by a few relay clicks because we can
@@ -361,6 +361,6 @@ while run:
             run = False
 
     # Render the UI at 30 FPS.
-    if utime.ticks_ms() - rendered_at > 33:
+    if utime.ticks_ms() - rendered_at > 16:
         renderer.flush_frame_buffer()
         rendered_at = utime.ticks_ms()

@@ -17,7 +17,7 @@ def get_git_info(repo_path):
         minor = match.group(2)
         fix = match.group(3)
     else:
-        major = minor = fix = 'Unknown'
+        major = minor = fix = 0
 
     # Get timestamp of the latest commit
     commit_timestamp = subprocess.check_output(['git', 'log', '-1', '--format=%ct'], cwd=repo_path).decode().strip()
@@ -28,6 +28,14 @@ def get_git_info(repo_path):
 
 def generate_version_file(output_path, repo_path):
     tag, commit_hash, branch, major, minor, fix, formatted_timestamp = get_git_info(repo_path)
+    print ('Version information:')
+    print (f'Tag: {tag}')
+    print (f'Commit hash: {commit_hash}')
+    print (f'Branch: {branch}')
+    print (f'Major: {major}')
+    print (f'Minor: {minor}')
+    print (f'Fix: {fix}')
+    print (f'Timestamp: {formatted_timestamp}')
     version_file_contents = f'''# Auto-generated version information
 tag = "{tag}"
 commit_hash = "{commit_hash}"

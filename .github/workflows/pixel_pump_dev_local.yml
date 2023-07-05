@@ -29,23 +29,23 @@ jobs:
         cp $GITHUB_WORKSPACE/ports/rp2/mpconfigport.h $GITHUB_WORKSPACE/micropython/ports/rp2/
         cp $GITHUB_WORKSPACE/ports/rp2/tusb_config.h $GITHUB_WORKSPACE/micropython/ports/rp2/
         cp $GITHUB_WORKSPACE/ports/rp2/tusb_port.c $GITHUB_WORKSPACE/micropython/ports/rp2/
-    - name: Build blank MicroPython firmware (without Pixel Pump files)
-      run: | 
-        cd $GITHUB_WORKSPACE/micropython/
-        make -C mpy-cross
-        git submodule update --init lib/pico-sdk lib/tinyusb
-        make -C ports/rp2 BOARD=PICO
-        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware-blank.uf2
+    # - name: Build blank MicroPython firmware (without Pixel Pump files)
+    #   run: | 
+    #     cd $GITHUB_WORKSPACE/micropython/
+    #     make -C mpy-cross
+    #     git submodule update --init lib/pico-sdk lib/tinyusb
+    #     make -C ports/rp2 BOARD=PICO
+    #     mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware-blank.uf2
     - name: Generate Version File
       run: |
-        python3 $GITHUB_WORKSPACE/tools/generateVersionFile.py --output $GITHUB_WORKSPACE/src/version.py
+        python3 $GITHUB_WORKSPACE/tools/generateVersionFile.py --output $GITHUB_WORKSPACE/src/version.py --repo $GITHUB_WORKSPACE
     - name: Copy Pixel Pump firmware to MicroPython
       run: |
         cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/rp2/modules/
-    - name: Build Pixel Pump Firmware
-      run: |
-        cd $GITHUB_WORKSPACE/micropython/
-        make -C ports/rp2 BOARD=PICO
+    # - name: Build Pixel Pump Firmware
+    #   run: |
+    #     cd $GITHUB_WORKSPACE/micropython/
+    #     make -C ports/rp2 BOARD=PICO
 
 
 

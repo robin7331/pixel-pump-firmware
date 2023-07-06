@@ -114,7 +114,7 @@ class SettingsManager:
     
     def set_secondary_pedal_long_key_modifier(self, key, persist=True):
         self.set_property('secondary_pedal_long_key_modifier', key, persist)
-
+ 
     def get_secondary_pedal_long_key_modifier(self):
         return self.get_property('secondary_pedal_long_key_modifier', default=0x00)
     

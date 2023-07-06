@@ -1,7 +1,7 @@
 import version
 import select
 import sys
-from pixel_pump import PowerMode
+from enums.power_mode import PowerMode
 import machine
 import sys
 
@@ -33,11 +33,16 @@ class CommunicationManager:
         print("Unknown command '" + command + "'")
     
     def parse_version_cmd(self, arguments):
+        if not self.check_has_argument(arguments, 0):
+                return
+        
         arguments = arguments[0]
         if arguments == "info":
           print(version.tag + "," + version.branch + "," + version.commit_hash + "," + version.timestamp)
 
     def parse_reset_cmd(self, arguments):
+        if not self.check_has_argument(arguments, 0):
+                return
         arguments = arguments[0]
         if arguments == "soft":
           sys.exit()
@@ -47,6 +52,8 @@ class CommunicationManager:
 
 
     def parse_settings_cmd(self, arguments):
+        if not self.check_has_argument(arguments, 0):
+                return
         cmd = arguments[0]
         if cmd == "dump":
             print(self.settings_manager.read_all_settings())
@@ -172,10 +179,12 @@ class CommunicationManager:
     
 
     def check_has_argument(self, arguments, index): 
-        if len(arguments) < index:
+        try:
+            arguments[index]
+            return True
+        except IndexError:
             print("Missing argument")
             return False
-        return True
 
     def check_valid_float_argument(self, arguments, index):
         if len(arguments) < index:

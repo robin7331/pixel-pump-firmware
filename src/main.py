@@ -1,16 +1,15 @@
 import machine
-from machine import Pin, PWM, mem32
+from machine import Pin, PWM, mem32, Timer
 from ui_renderer import UIRenderer
-from machine import Timer
 from io_event_source import IOEventSource, IOEvent
 from button import Button
 from valve import Valve
-from pixel_pump import PixelPump, PowerMode
+from pixel_pump import PixelPump
+from enums.power_mode import PowerMode
 from boot_sequence import run_boot_sequence
 from motor import Motor
 import utime
 import keyboard
-from machine import UART, Pin
 from communication_manager import CommunicationManager
 
 # Register Base Addresses

@@ -16,6 +16,17 @@ class SettingsManager:
                 self.settings = {}
                 ujson.dump(self.settings, file)
 
+    def read_all_settings(self):
+        return ujson.dumps(self.settings)
+    
+    def write_all_settings(self, settings):
+        self.settings = ujson.loads(settings)
+        self.persist_settings()
+
+    def reset_settings(self):
+        self.settings = {}
+        self.persist_settings()
+
     def persist_settings(self):
         try:
             with open(self.file_name, 'w') as file:
@@ -81,3 +92,29 @@ class SettingsManager:
 
     def set_mode(self, mode, persist=True):
         self.set_property('mode', mode, persist)
+
+    # add methods to set and get the secondary_pedal_key which is a hex code as 0x11
+    def set_secondary_pedal_key(self, key, persist=True):
+        self.set_property('secondary_pedal_key', key, persist)
+
+    def get_secondary_pedal_key(self):
+        return self.get_property('secondary_pedal_key', default=0x11)
+    
+    def set_secondary_pedal_key_modifier(self, key, persist=True):
+        self.set_property('secondary_pedal_key_modifier', key, persist)
+
+    def get_secondary_pedal_key_modifier(self):
+        return self.get_property('secondary_pedal_key_modifier', default=0x00)
+    
+    def set_secondary_pedal_long_key(self, key, persist=True):
+        self.set_property('secondary_pedal_long_key', key, persist)
+
+    def get_secondary_pedal_long_key(self):
+        return self.get_property('secondary_pedal_long_key', default=0x52)
+    
+    def set_secondary_pedal_long_key_modifier(self, key, persist=True):
+        self.set_property('secondary_pedal_long_key_modifier', key, persist)
+
+    def get_secondary_pedal_long_key_modifier(self):
+        return self.get_property('secondary_pedal_long_key_modifier', default=0x00)
+    

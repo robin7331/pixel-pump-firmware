@@ -115,7 +115,7 @@ class State:
     def to_lift(self):
         pass
 
-    def to_drop(self):
+    def to_drop(self, autorun=True):
         pass
 
     def to_brightness_settings(self):
@@ -168,7 +168,7 @@ class LiftState(State):
         self.device.trigger_button.stop_pulsating()
         self.device.trigger_button.clear_color()
 
-    def to_drop(self):
+    def to_drop(self, autorun=True):
         self.device.set_state(DropState(self.device))
 
     def to_reverse(self):
@@ -232,12 +232,13 @@ class DropState(State):
     def to_lift(self):
         self.device.set_state(LiftState(self.device))
 
-    def to_drop(self):
-        if self.paused:
-            self.set_running()
-        else:
-            self.set_paused()
-            self.vent()
+    def to_drop(self, autorun=True):
+        if autorun:
+            if self.paused:
+                self.set_running()
+            else:
+                self.set_paused()
+                self.vent()
 
     def to_reverse(self):
         self.device.set_state(ReverseState(self.device))
@@ -292,7 +293,7 @@ class ReverseState(State):
     def to_lift(self):
         self.device.set_state(LiftState(self.device))
 
-    def to_drop(self):
+    def to_drop(self, autorun=True):
         self.device.set_state(DropState(self.device))
 
     def to_reverse(self):
@@ -489,70 +490,3 @@ class HighPowerSettings(State):
         self.device.high_duty = self.old_duty
         self.device.set_last_state()
 
-
-class ScreenSaver(State):
-    def __init__(self, device):
-        super().__init__(device)
-        self.last_animation_step_at = 0
-        self.animation_step = 0
-
-    def on_enter(self, previous_state):
-        self.device.lift_button.stop_pulsating()
-        self.device.lift_button.clear_color()
-
-        self.device.drop_button.stop_pulsating()
-        self.device.drop_button.clear_color()
-
-        self.device.low_button.stop_pulsating()
-        self.device.low_button.clear_color()
-
-        self.device.high_button.stop_pulsating()
-        self.device.high_button.clear_color()
-
-        self.device.reverse_button.stop_pulsating()
-        self.device.reverse_button.clear_color()
-
-        self.device.trigger_button.stop_pulsating()
-        self.device.trigger_button.clear_color()
-
-    def on_exit(self, next_state):
-        self.device.lift_button.clear_color()
-        self.device.drop_button.clear_color()
-        self.device.low_button.clear_color()
-        self.device.high_button.clear_color()
-        self.device.reverse_button.clear_color()
-        self.device.trigger_button.clear_color()
-
-    def on_button_event(self, btn, event):
-        self.device.set_last_state()
-
-    def button_for_index(self, index):
-        if index is 0:
-            return self.device.lift_button
-        if index is 1:
-            return self.device.drop_button
-        if index is 2:
-            return self.device.low_button
-        if index is 3:
-            return self.device.high_button
-        if index is 4:
-            return self.device.reverse_button
-        if index is 5:
-            return self.device.trigger_button
-
-    def tick(self):
-
-        if utime.ticks_ms() - self.last_animation_step_at > 50:
-            self.last_animation_step_at = utime.ticks_ms()
-            self.animation_step = self.animation_step + 1
-            if self.animation_step > 9:
-                self.animation_step = 0
-            self.show_animation_step(self.animation_step)
-
-    def show_animation_step(self, step):
-        if step <= 5:
-            self.button_for_index(step).set_color(
-                Colors.BLUE, Brightness.DIMMER)
-        else:
-            step = step - 6
-            self.button_for_index(step).clear_color()

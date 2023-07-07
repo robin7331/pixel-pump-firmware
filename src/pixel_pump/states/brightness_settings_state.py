@@ -1,10 +1,9 @@
-from button import ButtonEvent
-from enums.colors import Colors
-from enums.brightness import Brightness
 import machine
-import states
+from pixel_pump.controls.button_event import ButtonEvent
+from pixel_pump.enums import Colors, Brightness
+from .state import State
 
-class BrightnessSettingsState(states.State):
+class BrightnessSettingsState(State):
     def __init__(self, device):
         super().__init__(device)
         self.old_brightness_modifier = None

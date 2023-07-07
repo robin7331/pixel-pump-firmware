@@ -1,9 +1,9 @@
-from enums.colors import Colors
-from enums.brightness import Brightness
-import states
+from pixel_pump.enums import Colors, Brightness
+from .reverse_state import ReverseState
+from .brightness_settings_state import BrightnessSettingsState
+from .state import State
 
-
-class DropState(states.State):
+class DropState(State):
     def __init__(self, device):
         super().__init__(device)
 
@@ -35,7 +35,8 @@ class DropState(states.State):
         self.device.nc_valve.deactivate(500)
 
     def to_lift(self):
-        self.device.set_state(states.LiftState(self.device))
+        from .lift_state import LiftState
+        self.device.set_state(LiftState(self.device))
 
     def to_drop(self, autorun=True):
         if autorun:
@@ -46,10 +47,10 @@ class DropState(states.State):
                 self.vent()
 
     def to_reverse(self):
-        self.device.set_state(states.ReverseState(self.device))
+        self.device.set_state(ReverseState(self.device))
 
     def to_brightness_settings(self):
-        self.device.set_state(states.BrightnessSettings(self.device))
+        self.device.set_state(BrightnessSettingsState(self.device))
 
     def trigger_on(self):
         if self.paused:

@@ -1,9 +1,9 @@
 import version
 import select
 import sys
-from enums.power_mode import PowerMode
 import machine
-import sys
+
+from pixel_pump.enums import power_mode
 
 class CommunicationManager:
     def __init__(self, pixel_pump):
@@ -109,10 +109,10 @@ class CommunicationManager:
             
             target_mode = arguments[1]
             if target_mode == "high":
-                self.pixel_pump.set_power_mode(PowerMode.HIGH)
+                self.pixel_pump.set_power_mode(power_mode.HIGH)
                 return
             if target_mode == "low":
-                self.pixel_pump.set_power_mode(PowerMode.LOW)
+                self.pixel_pump.set_power_mode(power_mode.LOW)
                 return
                         
             return

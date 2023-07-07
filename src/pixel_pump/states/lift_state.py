@@ -1,8 +1,9 @@
-from enums.colors import Colors
-from enums.brightness import Brightness
-import states
+from pixel_pump.enums import Colors, Brightness
+from .brightness_settings_state import BrightnessSettingsState
+from .reverse_state import ReverseState
+from .state import State
 
-class LiftState(states.State):
+class LiftState(State):
     def __init__(self, device):
         super().__init__(device)
 
@@ -21,13 +22,14 @@ class LiftState(states.State):
         self.device.trigger_button.clear_color()
 
     def to_drop(self, autorun=True):
-        self.device.set_state(states.DropState(self.device))
+        from .drop_state import DropState
+        self.device.set_state(DropState(self.device))
 
     def to_reverse(self):
-        self.device.set_state(states.ReverseState(self.device))
+        self.device.set_state(ReverseState(self.device))
 
     def to_brightness_settings(self):
-        self.device.set_state(states.BrightnessSettingsState(self.device))
+        self.device.set_state(BrightnessSettingsState(self.device))
 
     def trigger_on(self):
         self.device.trigger_button.stop_pulsating()

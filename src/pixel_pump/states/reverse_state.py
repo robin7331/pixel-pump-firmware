@@ -1,9 +1,9 @@
-from enums.power_mode import PowerMode
-from enums.colors import Colors
-from enums.brightness import Brightness
-import states
+from pixel_pump.enums.power_mode import PowerMode
+from pixel_pump.enums import Colors, Brightness
+from .state import State
+from .brightness_settings_state import BrightnessSettingsState
 
-class ReverseState(states.State):
+class ReverseState(State):
     def __init__(self, device):
         super().__init__(device)
         self.old_power_mode = None
@@ -28,17 +28,19 @@ class ReverseState(states.State):
         self.device.set_power_mode(self.old_power_mode)
 
     def to_lift(self):
-        self.device.set_state(states.LiftState(self.device))
+        from .lift_state import LiftState
+        self.device.set_state(LiftState(self.device))
 
     def to_drop(self, autorun=True):
-        self.device.set_state(states.DropState(self.device))
+        from .drop_state import DropState
+        self.device.set_state(DropState(self.device))
 
     def to_reverse(self):
         self.device.reverse_button.clear_color()
         self.device.set_last_state()
 
     def to_brightness_settings(self):
-        self.device.set_state(states.BrightnessSettings(self.device))
+        self.device.set_state(BrightnessSettingsState(self.device))
 
     def trigger_on(self):
         self.device.motor.start()

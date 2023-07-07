@@ -1,6 +1,5 @@
 import utime
 
-
 def wheel(pos):
     if pos < 0 or pos > 255:
         return (0, 0, 0)

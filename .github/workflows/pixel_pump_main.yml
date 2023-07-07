@@ -40,12 +40,13 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP BOARD_VARIANT=EMPTY
-        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware-blank.uf2
+        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware-blank.uf2
     - name: Build Pixel Pump Firmware
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP clean
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP
+        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware.uf2
     - uses: marvinpinto/action-automatic-releases@latest
       name: Release
       with:
@@ -54,8 +55,8 @@ jobs:
         draft: true
         title: "Pixel Pump Release Build"
         files: |
-          micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2
-          micropython/ports/rp2/build-PIXEL_PUMP/firmware-blank.uf2
+          firmware.uf2
+          firmware-blank.uf2
 
 
 

@@ -2,13 +2,7 @@ from machine import Pin
 import utime
 import math
 
-
-class ButtonEvent:
-    TOUCH_DOWN = 0
-    TOUCH_UP = 1
-    TOUCH = 2
-    LONG_PRESS = 3
-
+from .button_event import ButtonEvent
 
 class Button:
     def __init__(self, title, left_led_index, right_led_index, switch_pin, secondary_switch_pin=None, on_button_event=None, on_touch_down=None, on_touch_up=None, on_touch=None, on_long_press=None, on_should_render=None, lerp_speed=0.25):

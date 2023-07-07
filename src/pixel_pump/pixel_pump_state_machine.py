@@ -1,12 +1,14 @@
-from button import ButtonEvent
-from settings_manager import SettingsManager
-from states import LiftState, DropState, ReverseState
-from enums.power_mode import PowerMode
-from enums.colors import Colors
-from enums.brightness import Brightness
+
+from .settings_manager import SettingsManager
+from .states.lift_state import LiftState
+from .states.drop_state import DropState
+from .states.reverse_state import ReverseState
+from .enums.brightness import Brightness
+from .enums.power_mode import PowerMode
+from .enums.colors import Colors
 
 
-class PixelPump:
+class PixelPumpStateMachine:
     def __init__(self, motor, ui_renderer, lift_button, drop_button, low_button, high_button, reverse_button, trigger_button, nc_valve, no_valve, three_way_valve):
         self.motor = motor
         self.ui_renderer = ui_renderer

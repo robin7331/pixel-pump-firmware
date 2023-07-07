@@ -24,28 +24,28 @@ jobs:
     - name: Apply HID fix
       run: |
         cd $GITHUB_WORKSPACE/micropython/
-        git am $GITHUB_WORKSPACE/drivers/rp2_hid/0001-shared-tinyusb-Add-USB-HID-support.patch
-    - name: Apply USB strings and enable HID fix
-      run: |
-        cd $GITHUB_WORKSPACE/micropython/
-        git am $GITHUB_WORKSPACE/drivers/rp2_hid/0001-ports-rp2-boards-PICO-Use-Pixel-Pump-USB-strings-and.patch
-    - name: Build blank MicroPython firmware (without Pixel Pump files)
-      run: |
-        cd $GITHUB_WORKSPACE/micropython/
-        make -C mpy-cross
-        git submodule update --init lib/pico-sdk lib/tinyusb
-        make -C ports/rp2 BOARD=PICO
-        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PICO/firmware-blank.uf2
+        git apply -v --ignore-space-change --ignore-whitespace $GITHUB_WORKSPACE/drivers/rp2_hid/0001-shared-tinyusb-Add-USB-HID-support.patch
     - name: Generate Version File
       run: |
         python3 $GITHUB_WORKSPACE/tools/generateVersionFile.py --output $GITHUB_WORKSPACE/src/version.py --repo $GITHUB_WORKSPACE
-    - name: Copy Pixel Pump firmware to MicroPython
+    - name: Build mpy-cross
       run: |
-        cp -a $GITHUB_WORKSPACE/src/. $GITHUB_WORKSPACE/micropython/ports/rp2/modules/
+        cd $GITHUB_WORKSPACE/micropython/
+        make -C mpy-cross
+    - name: Build ports/rp2 submodules
+      run: |
+        cd $GITHUB_WORKSPACE/micropython/
+        make -C ports/rp2 submodules
+    - name: Build Empty Pixel Pump firmware
+      run: |
+        cd $GITHUB_WORKSPACE/micropython/
+        make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP BOARD_VARIANT=EMPTY
+        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware-blank.uf2
     - name: Build Pixel Pump Firmware
       run: |
         cd $GITHUB_WORKSPACE/micropython/
-        make -C ports/rp2 BOARD=PICO
+        make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP clean
+        make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP
     - uses: marvinpinto/action-automatic-releases@latest
       name: Release
       with:
@@ -55,8 +55,8 @@ jobs:
         title: "Pixel Pump Dev Build"
         automatic_release_tag: latest
         files: |
-          micropython/ports/rp2/build-PICO/firmware.uf2
-          micropython/ports/rp2/build-PICO/firmware-blank.uf2
+          micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2
+          micropython/ports/rp2/build-PIXEL_PUMP/firmware-blank.uf2
 
 
 

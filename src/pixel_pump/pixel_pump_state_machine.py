@@ -32,8 +32,8 @@ class PixelPumpStateMachine:
         power_mode = self.settings_manager.get_power_mode()
 
         self.set_power_mode(power_mode)
-        self.high_duty = self.settings_manager.get_high_pwm_duty()
-        self.low_duty = self.settings_manager.get_low_pwm_duty()
+        self.high_duty = int(self.settings_manager.get_high_power_setting() * 2.55)
+        self.low_duty = int(self.settings_manager.get_low_power_setting() * 2.55)
 
         self.motor.on_timeout = lambda motor: self.state.on_motor_timeout(
             motor)

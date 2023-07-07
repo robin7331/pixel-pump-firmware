@@ -127,8 +127,8 @@ class CommunicationManager:
             if percentage > 100:
                 percentage = 100
 
-            self.pixel_pump.settings_manager.set_low_pwm_duty(int(percentage * 2.55))
-            self.pixel_pump.low_duty = self.settings_manager.get_low_pwm_duty()                
+            self.pixel_pump.settings_manager.set_low_power_setting(percentage)
+            self.pixel_pump.low_duty = int(self.settings_manager.get_low_power_setting() * 2.55)            
             return
     
         if cmd == "set_high_power_setting":
@@ -141,8 +141,8 @@ class CommunicationManager:
             if percentage > 100:
                 percentage = 100
 
-            self.pixel_pump.settings_manager.set_high_pwm_duty(int(percentage * 2.55))
-            self.pixel_pump.high_duty = self.settings_manager.get_high_pwm_duty()              
+            self.pixel_pump.settings_manager.set_high_power_setting(percentage)
+            self.pixel_pump.high_duty = int(self.settings_manager.get_high_power_setting() * 2.55)
             return
         
         if cmd == "set_secondary_pedal_key":

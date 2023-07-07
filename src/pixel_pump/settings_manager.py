@@ -61,25 +61,25 @@ class SettingsManager:
             brightness = 0.35
         self.set_property('brightness', brightness, persist)
 
-    def get_low_pwm_duty(self):
-        return self.get_property('low_pwm_duty', default=200)
+    def get_low_power_setting(self):
+        return self.get_property('low_power_setting', default=65)
 
-    def set_low_pwm_duty(self, duty, persist=True):
-        if duty > 255:
-            duty = 255
+    def set_low_power_setting(self, power, persist=True):
+        if power > 100:
+            power = 100
+        if power < 0:
+            power = 0
+        self.set_property('low_power_setting', power, persist)
+
+    def get_high_power_setting(self):
+        return self.get_property('high_power_setting', default=100)
+
+    def set_power_setting(self, duty, persist=True):
+        if duty > 100:
+            duty = 100
         if duty < 0:
             duty = 0
-        self.set_property('low_pwm_duty', duty, persist)
-
-    def get_high_pwm_duty(self):
-        return self.get_property('high_pwm_duty', default=255)
-
-    def set_high_pwm_duty(self, duty, persist=True):
-        if duty > 255:
-            duty = 255
-        if duty < 0:
-            duty = 0
-        self.set_property('high_pwm_duty', duty, persist)
+        self.set_property('high_power_setting', duty, persist)
 
     def get_power_mode(self):
         return self.get_property('power_mode', default=1)

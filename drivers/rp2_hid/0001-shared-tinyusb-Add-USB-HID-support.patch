@@ -1,30 +1,30 @@
+From bd3bfb1855119c0ef563e46333e87bb369ba7820 Mon Sep 17 00:00:00 2001
 From: Jim Mussared <jim.mussared@gmail.com>
 Date: Fri, 7 Jul 2023 17:16:47 +1000
 Subject: [PATCH] shared/tinyusb: Add USB HID support.
 
 Signed-off-by: Jim Mussared <jim.mussared@gmail.com>
 ---
- extmod/extmod.cmake                   |  1 +
- extmod/modusb_hid.c                   | 67 ++++++++++++++++++++
- ports/rp2/boards/PICO/mpconfigboard.h |  2 +
- shared/tinyusb/mp_usbd.h              | 12 ++++
- shared/tinyusb/mp_usbd_descriptor.c   | 89 +++++++++++++++++++++++++++
- shared/tinyusb/tusb_config.h          | 48 ++++++++++++---
- 6 files changed, 211 insertions(+), 8 deletions(-)
+ extmod/extmod.cmake                 |  1 +
+ extmod/modusb_hid.c                 | 67 ++++++++++++++++++++++
+ shared/tinyusb/mp_usbd.h            | 12 ++++
+ shared/tinyusb/mp_usbd_descriptor.c | 89 +++++++++++++++++++++++++++++
+ shared/tinyusb/tusb_config.h        | 48 +++++++++++++---
+ 5 files changed, 209 insertions(+), 8 deletions(-)
  create mode 100644 extmod/modusb_hid.c
 
 diff --git a/extmod/extmod.cmake b/extmod/extmod.cmake
-index 67f33cf91..22678494a 100644
+index 0e5ed9422..554f2f959 100644
 --- a/extmod/extmod.cmake
 +++ b/extmod/extmod.cmake
-@@ -35,6 +35,7 @@ set(MICROPY_SOURCE_EXTMOD
-     ${MICROPY_EXTMOD_DIR}/modssl_axtls.c
-     ${MICROPY_EXTMOD_DIR}/modssl_mbedtls.c
-     ${MICROPY_EXTMOD_DIR}/modtime.c
-+    ${MICROPY_EXTMOD_DIR}/modusb_hid.c
-     ${MICROPY_EXTMOD_DIR}/modwebsocket.c
-     ${MICROPY_EXTMOD_DIR}/modzlib.c
+@@ -37,6 +37,7 @@ set(MICROPY_SOURCE_EXTMOD
+     ${MICROPY_EXTMOD_DIR}/moduwebsocket.c
+     ${MICROPY_EXTMOD_DIR}/moduzlib.c
      ${MICROPY_EXTMOD_DIR}/modwebrepl.c
++    ${MICROPY_EXTMOD_DIR}/modusb_hid.c
+     ${MICROPY_EXTMOD_DIR}/network_cyw43.c
+     ${MICROPY_EXTMOD_DIR}/network_lwip.c
+     ${MICROPY_EXTMOD_DIR}/network_ninaw10.c
 diff --git a/extmod/modusb_hid.c b/extmod/modusb_hid.c
 new file mode 100644
 index 000000000..e6ee309c8

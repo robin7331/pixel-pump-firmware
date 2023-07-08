@@ -1,9 +1,10 @@
-import version
 import select
 import sys
 import machine
 
 from pixel_pump.enums import power_mode
+from pixel_pump import version as version
+
 
 class CommunicationManager:
     def __init__(self, pixel_pump):

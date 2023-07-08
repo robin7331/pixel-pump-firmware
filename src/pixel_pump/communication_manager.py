@@ -3,7 +3,7 @@ import sys
 import machine
 
 from pixel_pump.enums import power_mode
-from pixel_pump import version as version
+from pixel_pump import version
 
 
 class CommunicationManager:

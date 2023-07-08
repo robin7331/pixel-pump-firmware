@@ -62,7 +62,7 @@ class SettingsManager:
         self.set_property('brightness', brightness, persist)
 
     def get_low_power_setting(self):
-        return self.get_property('low_power_setting', default=65)
+        return self.get_property('low_power_setting', default=80)
 
     def set_low_power_setting(self, power, persist=True):
         if power > 100:

@@ -18,6 +18,10 @@ class CommunicationManager:
         command = line.split(":")[0]
         arguments = line.split(":")[1:]
 
+        if command is "bootloader":
+            machine.bootloader()
+            return
+    
         if command is "version":
             self.parse_version_cmd(arguments)
             return

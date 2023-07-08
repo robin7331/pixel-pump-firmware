@@ -31,7 +31,7 @@ jobs:
         git apply -v --ignore-space-change --ignore-whitespace $GITHUB_WORKSPACE/drivers/rp2_hid/0001-shared-tinyusb-Add-USB-HID-support.patch
     - name: Generate Version File
       run: |
-        python3 $GITHUB_WORKSPACE/tools/generateVersionFile.py --output $GITHUB_WORKSPACE/src/version.py --repo $GITHUB_WORKSPACE
+        python3 $GITHUB_WORKSPACE/tools/generateVersionFile.py --output $GITHUB_WORKSPACE/src/pixel_pump/version.py --repo $GITHUB_WORKSPACE
     - name: Build mpy-cross
       run: |
         cd $GITHUB_WORKSPACE/micropython/

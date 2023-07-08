@@ -4,5 +4,4 @@
 /workflow
 .secrets
 settings.json
-/src/version.py
 __pycache__

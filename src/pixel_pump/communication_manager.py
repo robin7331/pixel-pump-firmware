@@ -21,7 +21,7 @@ class CommunicationManager:
 
         if command is "bootloader":
             from pixel_pump.states.bootloader_state import BootloaderState
-            self.pixel_pump.set_state(BootloaderState(self.device))
+            self.pixel_pump.set_state(BootloaderState(self.pixel_pump))
             return
     
         if command is "version":

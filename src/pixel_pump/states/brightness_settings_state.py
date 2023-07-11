@@ -36,7 +36,8 @@ class BrightnessSettingsState(State):
             self.device.ui_renderer.brightness_modifier = self.current_brightness_modifier
 
         if btn is self.device.drop_button and event is ButtonEvent.LONG_PRESS:
-            machine.bootloader()
+            from .bootloader_state import BootloaderState
+            self.device.set_state(BootloaderState(self.device))
 
     def to_reverse(self):
         self.device.trigger_button.clear_color()

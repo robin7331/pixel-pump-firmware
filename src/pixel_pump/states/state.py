@@ -47,5 +47,5 @@ class State:
     def on_motor_timeout(self, motor):
         pass
 
-    def tick(self):
+    def tick(self, tick_ms):
         pass

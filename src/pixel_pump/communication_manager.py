@@ -20,7 +20,8 @@ class CommunicationManager:
         arguments = line.split(":")[1:]
 
         if command is "bootloader":
-            machine.bootloader()
+            from pixel_pump.states.bootloader_state import BootloaderState
+            self.pixel_pump.set_state(BootloaderState(self.device))
             return
     
         if command is "version":

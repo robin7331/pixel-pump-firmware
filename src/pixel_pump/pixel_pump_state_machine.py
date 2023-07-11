@@ -81,7 +81,7 @@ class PixelPumpStateMachine:
         elif self.power_mode is PowerMode.MAX:
             return 255
 
-    def tick(self):
+    def tick(self, tick_ms):
         self.motor.set_pwm(self.target_motor_pwm())
-        self.state.tick()
+        self.state.tick(tick_ms)
 

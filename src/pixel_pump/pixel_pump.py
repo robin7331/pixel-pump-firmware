@@ -343,7 +343,7 @@ while True:
 
     motor.tick()
 
-    pixel_pump.tick()
+    pixel_pump.tick(utime.ticks_ms())
 
     communication_manager.tick()
 

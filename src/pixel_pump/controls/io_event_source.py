@@ -1,15 +1,7 @@
 from machine import Pin
 import utime
 
-
-class IOEvent:
-    ACTIVATE = 0
-    DEACTIVATE = 1
-    HOLD = 2
-    LONG_HOLD = 3
-    ULTRA_LONG_HOLD = 4
-    TAPPED = 5
-
+from .io_event import IOEvent
 
 class IOEventSource:
     def __init__(self, title, pin_number, pin_mode, pin_pull, long_hold_threshold=750, tapped_threshold=300, on_event=None, on_tapped=None, on_active=None, on_deactive=None, on_hold=None, on_long_hold=None):

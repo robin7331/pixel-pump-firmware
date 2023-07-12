@@ -1,17 +1,17 @@
-name: Pixel Pump Main
+name: Pixel Pump Local
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - dev
 
 jobs:
-  dev-build:
+  local-dev-build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
       with:
-        fetch-depth: 0
+        path: "pixel-pump-firmware"
     - uses: actions/checkout@v2
       with:
         repository: micropython/micropython
@@ -40,23 +40,12 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP BOARD_VARIANT=EMPTY
-        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware-blank.uf2
+        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware-blank.uf2
     - name: Build Pixel Pump Firmware
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP clean
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP
-        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware.uf2
-    - uses: marvinpinto/action-automatic-releases@latest
-      name: Release
-      with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        prerelease: false
-        draft: true
-        title: "Pixel Pump Release Build"
-        files: |
-          firmware.uf2
-          firmware-blank.uf2
 
 
 

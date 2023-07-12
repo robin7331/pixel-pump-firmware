@@ -1,0 +1,340 @@
+From bd3bfb1855119c0ef563e46333e87bb369ba7820 Mon Sep 17 00:00:00 2001
+From: Jim Mussared <jim.mussared@gmail.com>
+Date: Fri, 7 Jul 2023 17:16:47 +1000
+Subject: [PATCH] shared/tinyusb: Add USB HID support.
+
+Signed-off-by: Jim Mussared <jim.mussared@gmail.com>
+---
+ extmod/extmod.cmake                 |  1 +
+ extmod/modusb_hid.c                 | 67 ++++++++++++++++++++++
+ shared/tinyusb/mp_usbd.h            | 12 ++++
+ shared/tinyusb/mp_usbd_descriptor.c | 89 +++++++++++++++++++++++++++++
+ shared/tinyusb/tusb_config.h        | 48 +++++++++++++---
+ 5 files changed, 209 insertions(+), 8 deletions(-)
+ create mode 100644 extmod/modusb_hid.c
+
+diff --git a/extmod/extmod.cmake b/extmod/extmod.cmake
+index 0e5ed9422..554f2f959 100644
+--- a/extmod/extmod.cmake
++++ b/extmod/extmod.cmake
+@@ -37,6 +37,7 @@ set(MICROPY_SOURCE_EXTMOD
+     ${MICROPY_EXTMOD_DIR}/moduwebsocket.c
+     ${MICROPY_EXTMOD_DIR}/moduzlib.c
+     ${MICROPY_EXTMOD_DIR}/modwebrepl.c
++    ${MICROPY_EXTMOD_DIR}/modusb_hid.c
+     ${MICROPY_EXTMOD_DIR}/network_cyw43.c
+     ${MICROPY_EXTMOD_DIR}/network_lwip.c
+     ${MICROPY_EXTMOD_DIR}/network_ninaw10.c
+diff --git a/extmod/modusb_hid.c b/extmod/modusb_hid.c
+new file mode 100644
+index 000000000..e6ee309c8
+--- /dev/null
++++ b/extmod/modusb_hid.c
+@@ -0,0 +1,67 @@
++/*
++ * This file is part of the MicroPython project, http://micropython.org/
++ *
++ * The MIT License (MIT)
++ *
++ * Copyright (c) 2021 https://github.com/noobee/micropython/tree/usb-hid
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++#include "py/runtime.h"
++
++#if MICROPY_HW_USB_HID
++#include "tusb_config.h"
++#include "shared/tinyusb/mp_usbd.h"
++
++extern bool usbd_tud_hid_report(uint8_t report_id, void const *report, uint8_t len);
++
++STATIC mp_obj_t usb_hid_report(mp_obj_t report_id_obj, mp_obj_t report_obj) {
++    uint8_t report_id = mp_obj_get_int(report_id_obj);
++    mp_buffer_info_t report;
++    mp_get_buffer_raise(report_obj, &report, MP_BUFFER_READ);
++
++    if (report_id < USB_HID_REPORT_ID_MIN || report_id > USB_HID_REPORT_ID_MAX) {
++        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("report_id invalid (%d)"), report_id);
++    }
++
++    usbd_tud_hid_report(report_id, report.buf, report.len);
++    return mp_const_none;
++}
++MP_DEFINE_CONST_FUN_OBJ_2(usb_hid_report_obj, usb_hid_report);
++
++STATIC const mp_rom_map_elem_t usb_hid_module_globals_table[] = {
++    { MP_ROM_QSTR(MP_QSTR___name__),                MP_ROM_QSTR(MP_QSTR_usb_hid) },
++
++    { MP_ROM_QSTR(MP_QSTR_KEYBOARD),                MP_ROM_INT(USB_HID_REPORT_ID_KEYBOARD) },
++    { MP_ROM_QSTR(MP_QSTR_MOUSE),                   MP_ROM_INT(USB_HID_REPORT_ID_MOUSE) },
++    { MP_ROM_QSTR(MP_QSTR_MOUSE_ABS),               MP_ROM_INT(USB_HID_REPORT_ID_MOUSE_ABS) },
++    { MP_ROM_QSTR(MP_QSTR_CONSUMER_CONTROL),        MP_ROM_INT(USB_HID_REPORT_ID_CONSUMER_CONTROL) },
++    { MP_ROM_QSTR(MP_QSTR_GAMEPAD),                 MP_ROM_INT(USB_HID_REPORT_ID_GAMEPAD) },
++    { MP_ROM_QSTR(MP_QSTR_report),                  MP_ROM_PTR(&usb_hid_report_obj) },
++};
++STATIC MP_DEFINE_CONST_DICT(usb_hid_module_globals, usb_hid_module_globals_table);
++
++const mp_obj_module_t mp_module_usb_hid = {
++    .base = { &mp_type_module },
++    .globals = (mp_obj_dict_t *)&usb_hid_module_globals,
++};
++
++MP_REGISTER_MODULE(MP_QSTR_usb_hid, mp_module_usb_hid);
++#endif
+diff --git a/shared/tinyusb/mp_usbd.h b/shared/tinyusb/mp_usbd.h
+index 3a93b929c..d91393e95 100644
+--- a/shared/tinyusb/mp_usbd.h
++++ b/shared/tinyusb/mp_usbd.h
+@@ -36,4 +36,16 @@ void mp_usbd_task(void);
+ // Can write a string up to MICROPY_HW_USB_DESC_STR_MAX characters long, plus terminating byte.
+ extern void mp_usbd_port_get_serial_number(char *buf);
+ 
++// For rp2/modusb_hid.c
++enum
++{
++    USB_HID_REPORT_ID_MIN = 1,
++    USB_HID_REPORT_ID_KEYBOARD = USB_HID_REPORT_ID_MIN,  // 8 bytes: mod,resv,code[6]
++    USB_HID_REPORT_ID_MOUSE,                             // 5 bytes: but,dx,dy,vert,horiz
++    USB_HID_REPORT_ID_MOUSE_ABS,                         // 5 bytes: but,x16,y16
++    USB_HID_REPORT_ID_CONSUMER_CONTROL,                  // 2 bytes: ctrl16
++    USB_HID_REPORT_ID_GAMEPAD,                           // 11 bytes: x,y,z,rz,rx,ry,hat,but32
++    USB_HID_REPORT_ID_MAX = USB_HID_REPORT_ID_GAMEPAD,
++};
++
+ #endif // MICROPY_INCLUDED_SHARED_TINYUSB_USBD_H
+diff --git a/shared/tinyusb/mp_usbd_descriptor.c b/shared/tinyusb/mp_usbd_descriptor.c
+index 8fab599b6..ee4b2877f 100644
+--- a/shared/tinyusb/mp_usbd_descriptor.c
++++ b/shared/tinyusb/mp_usbd_descriptor.c
+@@ -33,6 +33,9 @@
+ #include "mp_usbd.h"
+ #include "mp_usbd_internal.h"
+ 
++#include "py/runtime.h"
++#include "py/mphal.h"
++
+ #define USBD_CDC_CMD_MAX_SIZE (8)
+ #define USBD_CDC_IN_OUT_MAX_SIZE (64)
+ 
+@@ -53,6 +56,68 @@ const tusb_desc_device_t mp_usbd_desc_device_static = {
+     .bNumConfigurations = 1,
+ };
+ 
++#if CFG_TUD_HID
++// Mouse Absolute Report Descriptor Template
++#define TUD_HID_REPORT_DESC_MOUSE_ABS(...) \
++    HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP), \
++    HID_USAGE(HID_USAGE_DESKTOP_MOUSE), \
++    HID_COLLECTION(HID_COLLECTION_APPLICATION), \
++    /* Report ID if any */ \
++    __VA_ARGS__ \
++    HID_USAGE(HID_USAGE_DESKTOP_POINTER), \
++    HID_COLLECTION(HID_COLLECTION_PHYSICAL), \
++    HID_USAGE_PAGE(HID_USAGE_PAGE_BUTTON), \
++    HID_USAGE_MIN(1), \
++    HID_USAGE_MAX(5), \
++    HID_LOGICAL_MIN(0), \
++    HID_LOGICAL_MAX(1), \
++    /* Left, Right, Middle, Backward, Forward buttons */ \
++    HID_REPORT_COUNT(5), \
++    HID_REPORT_SIZE(1), \
++    HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE), \
++    /* 3 bit padding */ \
++    HID_REPORT_COUNT(1), \
++    HID_REPORT_SIZE(3), \
++    HID_INPUT(HID_CONSTANT), \
++    HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP), \
++    /* X, Y position [0, 32767] */ \
++    HID_USAGE(HID_USAGE_DESKTOP_X), \
++    HID_USAGE(HID_USAGE_DESKTOP_Y), \
++    HID_LOGICAL_MIN_N(0x0000, 2), \
++    HID_LOGICAL_MAX_N(0x7fff, 2), \
++    HID_REPORT_COUNT(2), \
++    HID_REPORT_SIZE(16), \
++    HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE), \
++    HID_COLLECTION_END, \
++    HID_COLLECTION_END \
++
++uint8_t const desc_hid_report[] =
++{
++    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(USB_HID_REPORT_ID_KEYBOARD)),
++    TUD_HID_REPORT_DESC_MOUSE(HID_REPORT_ID(USB_HID_REPORT_ID_MOUSE)),
++    TUD_HID_REPORT_DESC_MOUSE_ABS(HID_REPORT_ID(USB_HID_REPORT_ID_MOUSE_ABS)),
++    TUD_HID_REPORT_DESC_CONSUMER(HID_REPORT_ID(USB_HID_REPORT_ID_CONSUMER_CONTROL)),
++    TUD_HID_REPORT_DESC_GAMEPAD(HID_REPORT_ID(USB_HID_REPORT_ID_GAMEPAD)),
++};
++
++uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
++    return desc_hid_report;
++}
++
++uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type,
++    uint8_t *buffer, uint16_t reqlen) {
++    return 0;
++}
++
++void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type,
++    uint8_t const *buffer, uint16_t bufsize) {
++
++    // echo back anything we received from host
++    // tud_hid_report(0, buffer, bufsize);
++    return;
++}
++#endif
++
+ const uint8_t mp_usbd_desc_cfg_static[USBD_STATIC_DESC_LEN] = {
+     TUD_CONFIG_DESCRIPTOR(1, USBD_ITF_STATIC_MAX, USBD_STR_0, USBD_STATIC_DESC_LEN,
+         0, USBD_MAX_POWER_MA),
+@@ -64,6 +129,10 @@ const uint8_t mp_usbd_desc_cfg_static[USBD_STATIC_DESC_LEN] = {
+     #if CFG_TUD_MSC
+     TUD_MSC_DESCRIPTOR(USBD_ITF_MSC, 5, EPNUM_MSC_OUT, EPNUM_MSC_IN, 64),
+     #endif
++    #if CFG_TUD_HID
++    TUD_HID_DESCRIPTOR(USBD_ITF_HID, USBD_STR_HID, HID_ITF_PROTOCOL_NONE,
++        sizeof(desc_hid_report), USBD_HID_EP_CMD, CFG_TUD_HID_EP_BUFSIZE, USBD_HID_POLL_INTERVAL),
++    #endif
+ };
+ 
+ const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
+@@ -98,6 +167,11 @@ const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
+             desc_str = MICROPY_HW_USB_MSC_INTERFACE_STRING;
+             break;
+         #endif
++        #if CFG_TUD_HID
++        case USBD_STR_HID:
++            desc_str = MICROPY_HW_USB_HID_INTERFACE_STRING;
++            break;
++        #endif
+         default:
+             desc_str = NULL;
+     }
+@@ -130,4 +204,19 @@ const uint8_t *tud_descriptor_configuration_cb(uint8_t index) {
+     return mp_usbd_desc_cfg_static;
+ }
+ 
++#if CFG_TUD_HID
++const bool usbd_tud_hid_report(uint8_t report_id, void const *report, uint8_t len) {
++    int retry = 100;
++    while (!tud_hid_ready() && --retry >= 0) {
++        if (retry == 0) {
++            mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%s timeout (%d)"),
++                __FUNCTION__, report_id);
++        }
++        mp_hal_delay_ms(1);
++    }
++
++    return tud_hid_report(report_id, report, len);
++}
++#endif
++
+ #endif
+diff --git a/shared/tinyusb/tusb_config.h b/shared/tinyusb/tusb_config.h
+index 28bee09a5..eb2c65d62 100644
+--- a/shared/tinyusb/tusb_config.h
++++ b/shared/tinyusb/tusb_config.h
+@@ -57,6 +57,16 @@
+ #define CFG_TUD_MSC             (0)
+ #endif
+ 
++#if MICROPY_HW_USB_HID
++#define CFG_TUD_HID             (1)
++#else
++#define CFG_TUD_HID             (0)
++#endif
++
++#if CFG_TUD_MSC && CFG_TUD_HID
++#error "Cannot support MSC+HID"
++#endif
++
+ // CDC Configuration
+ #if CFG_TUD_CDC
+ #define CFG_TUD_CDC_RX_BUFSIZE  (256)
+@@ -72,11 +82,17 @@
+ #define CFG_TUD_MSC_BUFSIZE (MICROPY_FATFS_MAX_SS)
+ #endif
+ 
++// HID Configuration
++#if CFG_TUD_HID
++#define MICROPY_HW_USB_HID_INTERFACE_STRING "Board HID"
++#endif
++
+ // Define static descriptor size and interface count based on the above config
+ 
+ #define USBD_STATIC_DESC_LEN (TUD_CONFIG_DESC_LEN +                     \
+     (CFG_TUD_CDC ? (TUD_CDC_DESC_LEN) : 0) +  \
+-    (CFG_TUD_MSC ? (TUD_MSC_DESC_LEN) : 0)    \
++    (CFG_TUD_MSC ? (TUD_MSC_DESC_LEN) : 0) +  \
++    (CFG_TUD_HID ? (TUD_HID_DESC_LEN) : 0)    \
+     )
+ 
+ #define USBD_STR_0 (0x00)
+@@ -85,6 +101,7 @@
+ #define USBD_STR_SERIAL (0x03)
+ #define USBD_STR_CDC (0x04)
+ #define USBD_STR_MSC (0x05)
++#define USBD_STR_HID (USBD_STR_MSC)
+ 
+ #define USBD_MAX_POWER_MA (250)
+ 
+@@ -112,19 +129,34 @@
+ #endif // CFG_TUD_CDC
+ #endif // CFG_TUD_MSC
+ 
++#if CFG_TUD_HID
++#define USBD_HID_POLL_INTERVAL (10) // in ms
++#if CFG_TUD_CDC
++#define USBD_ITF_HID (2)
++#define USBD_HID_EP_CMD (0x83)
++#else
++#define USBD_ITF_HID (0)
++#define USBD_HID_EP_CMD (0x81)
++#endif // CFG_TUD_CDC
++#endif // CFG_TUD_HID
++
+ /* Limits of statically defined USB interfaces, endpoints, strings */
+-#if CFG_TUD_MSC
++#if CFG_TUD_HID
++#define USBD_ITF_STATIC_MAX (USBD_ITF_HID + 1)
++// #define USBD_STR_STATIC_MAX (USBD_STR_HID + 1)
++// #define USBD_EP_STATIC_MAX (EPNUM_HID_OUT + 1)
++#elif CFG_TUD_MSC
+ #define USBD_ITF_STATIC_MAX (USBD_ITF_MSC + 1)
+-#define USBD_STR_STATIC_MAX (USBD_STR_MSC + 1)
+-#define USBD_EP_STATIC_MAX (EPNUM_MSC_OUT + 1)
++// #define USBD_STR_STATIC_MAX (USBD_STR_MSC + 1)
++// #define USBD_EP_STATIC_MAX (EPNUM_MSC_OUT + 1)
+ #elif CFG_TUD_CDC
+ #define USBD_ITF_STATIC_MAX (USBD_ITF_CDC + 2)
+-#define USBD_STR_STATIC_MAX (USBD_STR_CDC + 1)
+-#define USBD_EP_STATIC_MAX (((EPNUM_CDC_EP_IN)&~TUSB_DIR_IN_MASK) + 1)
++// #define USBD_STR_STATIC_MAX (USBD_STR_CDC + 1)
++// #define USBD_EP_STATIC_MAX (((EPNUM_CDC_EP_IN)&~TUSB_DIR_IN_MASK) + 1)
+ #else // !CFG_TUD_MSC && !CFG_TUD_CDC
+ #define USBD_ITF_STATIC_MAX (0)
+-#define USBD_STR_STATIC_MAX (0)
+-#define USBD_EP_STATIC_MAX (0)
++// #define USBD_STR_STATIC_MAX (0)
++// #define USBD_EP_STATIC_MAX (0)
+ #endif
+ 
+ #endif // MICROPY_HW_ENABLE_USBDEV
+-- 
+2.41.0
+

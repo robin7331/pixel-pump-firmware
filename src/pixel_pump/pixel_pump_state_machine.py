@@ -27,13 +27,16 @@ class PixelPumpStateMachine:
         self.high_duty = 0
         self.low_duty = 0
 
+        self.low_power_setting = 0
+        self.high_power_setting = 0
+
         self.settings_manager = SettingsManager()
         self.ui_renderer.brightness_modifier = self.settings_manager.get_brightness()
         power_mode = self.settings_manager.get_power_mode()
 
         self.set_power_mode(power_mode)
-        self.high_duty = int(self.settings_manager.get_high_power_setting() * 2.55)
-        self.low_duty = int(self.settings_manager.get_low_power_setting() * 2.55)
+        self.set_low_power_setting(self.settings_manager.get_low_power_setting())
+        self.set_high_power_setting(self.settings_manager.get_high_power_setting())
 
         self.motor.on_timeout = lambda motor: self.state.on_motor_timeout(
             motor)
@@ -72,6 +75,24 @@ class PixelPumpStateMachine:
         else:
             self.low_button.set_color(Colors.BLUE, Brightness.DEFAULT)
             self.high_button.clear_color()
+
+    def set_low_power_setting(self, percentage):
+        if percentage < 0:
+            percentage = 0
+        if percentage > 100:
+            percentage = 100
+
+        self.low_power_setting = percentage
+        self.low_duty = int(percentage * 2.55)
+
+    def set_high_power_setting(self, percentage):
+        if percentage < 0:
+            percentage = 0
+        if percentage > 100:
+            percentage = 100
+
+        self.high_power_setting = percentage
+        self.high_duty = int(percentage * 2.55)
 
     def target_motor_pwm(self):
         if self.power_mode is PowerMode.LOW:

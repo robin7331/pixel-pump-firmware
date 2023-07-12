@@ -1,17 +1,16 @@
 from pixel_pump.controls.button_event import ButtonEvent
 from pixel_pump.enums.power_mode import PowerMode
 from pixel_pump.enums import Colors, Brightness
-from . import State
+from .state import State
 
 class LowPowerSettingsState(State):
     def __init__(self, device):
         super().__init__(device)
-        self.old_duty = None
-        self.current_duty = None
+        self.old_power_setting = None
         self.old_power_mode = None
 
     def on_enter(self, previous_state):
-        self.old_duty = self.device.low_duty
+        self.old_power_setting = self.device.settings_manager.get_high_power_setting()
         self.old_power_mode = self.device.power_mode
         self.device.set_power_mode(PowerMode.LOW)
         self.device.motor.start()
@@ -31,30 +30,24 @@ class LowPowerSettingsState(State):
 
     def on_button_event(self, btn, event):
         if btn is self.device.low_button and event is ButtonEvent.TOUCH_DOWN:
-            duty = self.device.low_duty - 10
-            if duty < 0:
-                duty = 0
-            self.device.low_duty = duty
+            self.device.set_low_power_setting(self.device.low_power_setting - 5)
         if btn is self.device.high_button and event is ButtonEvent.TOUCH_DOWN:
-            duty = self.device.low_duty + 10
-            if duty > 255:
-                duty = 255
-            self.device.low_duty = duty
+            self.device.set_low_power_setting(self.device.low_power_setting + 5)
 
     def to_reverse(self):
         self.device.trigger_button.clear_color()
         self.device.reverse_button.clear_color()
-        self.device.low_duty = self.old_duty
+        self.device.set_low_power_setting(self.old_power_setting)
         self.device.set_last_state()
 
     def trigger_off(self):
         self.device.trigger_button.clear_color()
         self.device.reverse_button.clear_color()
-        self.device.settings_manager.set_low_pwm_duty(self.device.low_duty)
+        self.device.settings_manager.set_low_power_setting(self.device.low_power_setting)
         self.device.set_last_state()
 
     def on_motor_timeout(self, motor):
         self.device.trigger_button.clear_color()
         self.device.reverse_button.clear_color()
-        self.device.low_duty = self.old_duty
+        self.device.set_low_power_setting(self.old_power_setting)
         self.device.set_last_state()

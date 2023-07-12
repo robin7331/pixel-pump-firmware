@@ -7,12 +7,11 @@ from .state import State
 class HighPowerSettingsState(State):
     def __init__(self, device):
         super().__init__(device)
-        self.old_duty = None
-        self.current_duty = None
+        self.old_power_setting = None
         self.old_power_mode = None
 
     def on_enter(self, previous_state):
-        self.old_duty = self.device.high_duty
+        self.old_power_setting = self.device.settings_manager.get_low_power_setting()
         self.old_power_mode = self.device.power_mode
         self.device.set_power_mode(PowerMode.HIGH)
         self.device.motor.start()
@@ -32,30 +31,24 @@ class HighPowerSettingsState(State):
 
     def on_button_event(self, btn, event):
         if btn is self.device.low_button and event is ButtonEvent.TOUCH_DOWN:
-            duty = self.device.high_duty - 10
-            if duty < 0:
-                duty = 0
-            self.device.high_duty = duty
+            self.device.set_high_power_setting(self.device.high_power_setting - 5)
         if btn is self.device.high_button and event is ButtonEvent.TOUCH_DOWN:
-            duty = self.device.high_duty + 10
-            if duty > 255:
-                duty = 255
-            self.device.high_duty = duty
+            self.device.set_high_power_setting(self.device.high_power_setting + 5)
 
     def to_reverse(self):
         self.device.trigger_button.clear_color()
         self.device.reverse_button.clear_color()
-        self.device.high_duty = self.old_duty
+        self.device.set_high_power_setting(self.old_power_setting)
         self.device.set_last_state()
 
     def trigger_off(self):
         self.device.trigger_button.clear_color()
         self.device.reverse_button.clear_color()
-        self.device.settings_manager.set_high_pwm_duty(self.device.high_duty)
+        self.device.settings_manager.set_high_power_setting(self.device.high_power_setting)
         self.device.set_last_state()
 
     def on_motor_timeout(self, motor):
         self.device.trigger_button.clear_color()
         self.device.reverse_button.clear_color()
-        self.device.high_duty = self.old_duty
+        self.device.set_high_power_setting(self.old_power_setting)
         self.device.set_last_state()

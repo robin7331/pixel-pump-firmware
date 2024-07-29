@@ -178,6 +178,7 @@ motor = Motor(motorPin=5)
 
 # The UI Renderer class holds the frame buffer and the PIO state machine
 renderer = UIRenderer()
+
 def SetPadQSPI(pin, d, s):
     adr = PAD_QSPI + PAD_QSPI_MPY * pin
     n = mem32[adr]

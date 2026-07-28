@@ -4,6 +4,8 @@ from pixel_pump.enums import Colors, Brightness
 from .state import State
 
 class LowPowerSettingsState(State):
+    suspends_mapping = True
+
     def __init__(self, device):
         super().__init__(device)
         self.old_power_setting = None

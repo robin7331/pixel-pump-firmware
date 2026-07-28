@@ -4,6 +4,8 @@ from pixel_pump.enums import Colors, Brightness
 from .state import State
 
 class BrightnessSettingsState(State):
+    suspends_mapping = True
+
     def __init__(self, device):
         super().__init__(device)
         self.old_brightness_modifier = None

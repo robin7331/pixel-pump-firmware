@@ -70,7 +70,10 @@ class USBManager:
         mapping=None,
         hold_repeat_ms=120,
         max_queue_size=32,
-        max_response_queue_size=64,
+        # A bulk GET_MAPPING dump of a fully populated PP1 table is 8 controls
+        # x 2 slots x 4 gestures = 64 frames plus the terminator, and dropping
+        # the terminator leaves the host waiting forever.
+        max_response_queue_size=96,
         vendor_host_activity_timeout_ms=1200,
         vendor_host_open_grace_ms=0,
         device_heartbeat_interval_ms=500,

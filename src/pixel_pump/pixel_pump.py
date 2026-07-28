@@ -6,6 +6,7 @@ from .controls.button import Button
 from .controls.button_event import ButtonEvent
 from .controls.io_event_source import IOEventSource
 from .controls.io_event import IOEvent
+from .mapping import MappingEngine, MappingTable, check_factory_reset
 from .pixel_pump_state_machine import PixelPumpStateMachine
 from .valve import Valve
 from .boot_sequence import run_boot_sequence
@@ -199,71 +200,6 @@ for pin in range(6):
 # legacy stdin protocol from.
 usb_manager = USBManager(debug=False)
 
-def liftBtnTouchUp(btn):
-    global pixel_pump
-    pixel_pump.state.to_lift()
-
-
-def liftBtnLongPress(btn):
-    global pixel_pump
-    pixel_pump.state.to_brightness_settings()
-
-
-def dropBtnTouchUp(btn):
-    global pixel_pump
-    pixel_pump.state.to_drop()
-
-
-def reverse_buttonTouchDown(btn):
-    global pixel_pump
-    pixel_pump.state.to_reverse()
-
-
-# The trigger button (GPIO13) and the foot pedal (GPIO6) are independent
-# controls that both run the vacuum, so the state machine is driven off a set
-# of holders rather than off either control directly. Without it, "hold pedal,
-# tap button, release button" would stop the pump mid-pick.
-_pump_holders = set()
-
-
-def pump_trigger_press(holder):
-    global pixel_pump
-    if holder in _pump_holders:
-        return
-    was_idle = not _pump_holders
-    _pump_holders.add(holder)
-    if was_idle:
-        pixel_pump.state.trigger_on()
-
-
-def pump_trigger_release(holder):
-    global pixel_pump
-    if holder not in _pump_holders:
-        return
-    _pump_holders.remove(holder)
-    if not _pump_holders:
-        pixel_pump.state.trigger_off()
-
-
-def trigger_buttonTouchDown(btn):
-    pump_trigger_press(ControlId.TRIGGER_BTN)
-
-
-def trigger_buttonTouchUp(btn):
-    pump_trigger_release(ControlId.TRIGGER_BTN)
-
-
-# Controls are identified on the wire by Button.title.
-_BUTTON_CONTROL_IDS = {
-    'Lift': ControlId.LIFT,
-    'Drop': ControlId.DROP,
-    'Low': ControlId.LOW,
-    'High': ControlId.HIGH,
-    'Reverse': ControlId.REVERSE,
-    'Trigger': ControlId.TRIGGER_BTN,
-}
-
-
 def _button_event_to_usb_event_kind(event):
     if event == ButtonEvent.TOUCH_DOWN:
         return EventKind.PRESS
@@ -292,42 +228,61 @@ def _io_event_to_usb_event_kind(event):
     return None
 
 
-def on_button_event(btn, event):
-    global pixel_pump
+def _legacy_button_dispatch(btn, event):
+    # Settings menus keep their legacy in-menu handling and the mapping engine
+    # stays out of the way until the menu exits. LIFT and DROP are absent on
+    # purpose: no settings state implements their intents, so they were no-ops
+    # here before Phase 4 too.
     pixel_pump.state.on_button_event(btn, event)
 
+    if btn is trigger_button and event == ButtonEvent.TOUCH_DOWN:
+        # In a menu the trigger commits on release, via the state's
+        # trigger_off(). hold_pump() records it so the release undoes it from
+        # whichever path sees it.
+        mapping_engine.hold_pump(ControlId.TRIGGER_BTN)
+    elif btn is reverse_button and event == ButtonEvent.TOUCH_DOWN:
+        pixel_pump.state.to_reverse()
+
+    if event == ButtonEvent.TOUCH_UP:
+        # Also undoes a HELD action the mapping engine started before the menu
+        # opened -- e.g. a remapped LIFT long-pressed into the brightness menu.
+        mapping_engine.release_held(_CONTROL_IDS_BY_BUTTON.get(btn))
+
+
+def on_button_event(btn, event):
     # Publish-all: every control is reported to an active host, whatever it
     # does locally.
-    control_id = _BUTTON_CONTROL_IDS.get(btn.title)
+    control_id = _CONTROL_IDS_BY_BUTTON.get(btn)
     event_kind = _button_event_to_usb_event_kind(event)
     if control_id is not None and event_kind is not None:
         usb_manager.publish_event(control_id, event_kind)
+
+    if pixel_pump.state.suspends_mapping:
+        _legacy_button_dispatch(btn, event)
+        return
+
+    if control_id is not None and event_kind is not None:
+        mapping_engine.dispatch(control_id, event_kind)
+
 
 def on_foot_pedal_event(source, event):
     # The pedal has no LEDs of its own; the trigger button's pulsate/solid
     # feedback follows because both controls funnel into the same state
     # intents.
-    if event == IOEvent.ACTIVATE:
-        pump_trigger_press(ControlId.FPEDAL)
-    if event == IOEvent.DEACTIVATE:
-        pump_trigger_release(ControlId.FPEDAL)
-
     event_kind = _io_event_to_usb_event_kind(event)
     if event_kind is not None:
         usb_manager.publish_event(ControlId.FPEDAL, event_kind)
+        mapping_engine.dispatch(ControlId.FPEDAL, event_kind)
 
 
 def on_aux_pedal_event(source, event):
-    global pixel_pump
-    # https://deskthority.net/wiki/Scancode for keyboard codes
-    if event == IOEvent.TAPPED:
-        usb_manager.keyboard.tap(pixel_pump.settings_manager.get_secondary_pedal_key_modifier(), pixel_pump.settings_manager.get_secondary_pedal_key())
-    if event == IOEvent.LONG_HOLD:
-        usb_manager.keyboard.tap(pixel_pump.settings_manager.get_secondary_pedal_long_key_modifier(), pixel_pump.settings_manager.get_secondary_pedal_long_key())
-
+    # https://deskthority.net/wiki/Scancode for keyboard codes -- the pedal's
+    # legacy key and modifier still come from settings.json, reached through
+    # the SEND_KEY sentinel in the default table.
     event_kind = _io_event_to_usb_event_kind(event)
     if event_kind is not None:
         usb_manager.publish_event(ControlId.FPEDAL_AUX, event_kind)
+        mapping_engine.dispatch(ControlId.FPEDAL_AUX, event_kind)
 
 def renderBtn(btn):
     global renderer
@@ -342,8 +297,6 @@ lift_button = Button(title='Lift',
                      right_led_index=1,
                      switch_pin=8,
                      on_button_event=on_button_event,
-                     on_touch_down=liftBtnTouchUp,
-                     on_long_press=liftBtnLongPress,
                      on_should_render=renderBtn)
 
 drop_button = Button(title='Drop',
@@ -351,7 +304,6 @@ drop_button = Button(title='Drop',
                      right_led_index=3,
                      switch_pin=9,
                      on_button_event=on_button_event,
-                     on_touch_down=dropBtnTouchUp,
                      on_should_render=renderBtn)
 
 low_button = Button(title='Low',
@@ -373,7 +325,6 @@ reverse_button = Button(title='Reverse',
                         right_led_index=9,
                         switch_pin=12,
                         on_button_event=on_button_event,
-                        on_touch_down=reverse_buttonTouchDown,
                         on_should_render=renderBtn)
 
 trigger_button = Button(title='Trigger',
@@ -381,9 +332,23 @@ trigger_button = Button(title='Trigger',
                         right_led_index=11,
                         switch_pin=13,
                         on_button_event=on_button_event,
-                        on_touch_up=trigger_buttonTouchUp,
-                        on_touch_down=trigger_buttonTouchDown,
                         on_should_render=renderBtn)
+
+# Which control each button is on the wire, and what the mapping engine paints
+# when the host owns it. Keyed on the object, so renaming a button cannot
+# silently unhook it.
+_BUTTONS_BY_CONTROL_ID = {
+    ControlId.LIFT: lift_button,
+    ControlId.DROP: drop_button,
+    ControlId.LOW: low_button,
+    ControlId.HIGH: high_button,
+    ControlId.REVERSE: reverse_button,
+    ControlId.TRIGGER_BTN: trigger_button,
+}
+
+_CONTROL_IDS_BY_BUTTON = {}
+for _control_id in _BUTTONS_BY_CONTROL_ID:
+    _CONTROL_IDS_BY_BUTTON[_BUTTONS_BY_CONTROL_ID[_control_id]] = _control_id
 
 foot_pedal = IOEventSource(title='Foot Pedal', pin_number=6, pin_mode=Pin.IN, pin_pull=Pin.PULL_DOWN, on_event=on_foot_pedal_event)
 
@@ -406,6 +371,21 @@ pixel_pump = PixelPumpStateMachine(motor=motor,
                        three_way_valve=three_way_valve)
 
 communication_manager = CommunicationManager(pixel_pump)
+
+# The mapping table needs the settings manager, which PixelPumpStateMachine
+# owns, so both are wired up after it exists. USBManager reads .mapping lazily
+# per command, and answers ERROR UNKNOWN_COMMAND until this point.
+mapping_table = MappingTable(pixel_pump.settings_manager)
+mapping_engine = MappingEngine(mapping_table,
+                               pixel_pump,
+                               usb_manager.keyboard,
+                               _BUTTONS_BY_CONTROL_ID,
+                               usb_manager.is_vendor_host_active)
+usb_manager.mapping = mapping_table
+
+# Escape hatch, before anything else can paint the LEDs: a host can map every
+# button to FORWARD, and this is the only way back.
+check_factory_reset(mapping_table, renderer, (lift_button.pin, drop_button.pin))
 
 # Lets render the buttons at 30 fps (just for the boot sequence)
 uiTimer = Timer()
@@ -441,6 +421,10 @@ while True:
     communication_manager.tick()
 
     usb_manager.tick()
+
+    # After usb_manager.tick(), so a heartbeat timeout drops the buttons back
+    # to their STANDALONE colours in the same iteration it takes effect.
+    mapping_engine.tick()
 
     # Render the UI at 30 FPS.
     if utime.ticks_ms() - rendered_at > 33:

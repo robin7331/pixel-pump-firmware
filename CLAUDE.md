@@ -14,15 +14,18 @@ Two UF2s come out of every build:
 - `firmware-blank.uf2` — MicroPython plus the USB stack, without `src/`. Flash this for development,
   then push `src/` over USB.
 
-> ⚠️ **Branch `firmware-v2` is mid-migration (issue #30, `docs/plans/`).** Phases 0–3 have landed, so
-> both UF2s boot again. Phase 4 (the mapping engine) is next, and all open decisions are resolved.
+> ⚠️ **Branch `firmware-v2` is mid-migration (issue #30, `docs/plans/`).** Phases 0–4 have landed, so
+> both UF2s boot again. Phase 5 (code health & docs) is next, and all open decisions are resolved.
 > Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
 >
 > Phase 2 was verified on a physical pump on 2026-07-28. **Phase 3's gate is only half closed:** its
 > local behaviour was checked by hand the same day, but the wire-level half was not — that the foot
 > pedal publishes `FPEDAL` and not `TRIGGER_BTN`, that buttons emit `TAP`, and that the heartbeat
-> still reports model 1. Phase 4 sits directly on those frames, so confirm them before blaming Phase 4
-> for anything odd there.
+> still reports model 1.
+>
+> **Phase 4 has not run on hardware at all.** Its logic was checked against a CPython harness that
+> stubs `machine`/`utime`/`usb.device`; nothing about timing, LEDs or flash writes is confirmed, and
+> it sits directly on Phase 3's unverified frames.
 
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.25, async). Different
 > architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept
@@ -72,7 +75,7 @@ hard-errors on `MICROPY_BOARD_VARIANT`.
 640 KiB firmware / 1408 KiB littlefs, but `memmap_mp_rp2040.ld` is handed the *whole* 2 MB — an
 oversized image links silently and then overwrites the filesystem, `settings.json` included, on first
 boot. The boundary cannot move without wiping every unit in the field, so this check is the only
-guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 386,872 B full, ~59 % of ceiling.
+guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 392,340 B full, ~59 % of ceiling.
 
 | Workflow | Job | Trigger | Release |
 |----------|-----|---------|---------|
@@ -115,7 +118,7 @@ bottom. Importing it *is* starting the firmware.
 lift/drop/low/high/reverse/trigger .tick() → foot_pedal.tick() → secondary_pedal.tick()
   → no/nc/three_way valve.tick() → motor.tick()
   → pixel_pump.tick(ticks_ms) → communication_manager.tick() → usb_manager.tick()
-  → renderer.flush_frame_buffer()  (throttled to every 33 ms)
+  → mapping_engine.tick() → renderer.flush_frame_buffer()  (throttled to every 33 ms)
 ```
 
 `usb_manager.tick()` drains the event queue (max 4 frames), emits the 500 ms device heartbeat, flushes
@@ -142,9 +145,14 @@ they just forward to `pixel_pump.state.<intent>()`.
 Conventions worth preserving:
 
 - `State` base class defines every intent (`to_lift`, `to_drop`, `trigger_on`, …) as a no-op, so
-  states only override what they handle. Unhandled intents are silently ignored by design.
-- `State.on_button_event` handles Low/High power-mode selection for all states; settings states
-  override it entirely.
+  states only override what they handle. Unhandled intents are silently ignored by design. The
+  mapping engine speaks exactly this vocabulary — `mapping.py`'s `_perform` is the full list.
+- Four intents have a real base implementation rather than a no-op: `to_power_low` / `to_power_high`
+  (set the power mode), `to_low_power_settings` / `to_high_power_settings` (enter the menus).
+  `ReverseState` overrides all four to no-ops, because it forces `PowerMode.MAX`.
+- `State.on_button_event` is now reached **only** from the settings-menu path — states that set
+  `suspends_mapping = True` bypass the mapping engine and handle buttons themselves. Everything else
+  goes through the engine, so the base implementation is a no-op.
 - **Confirm vs. cancel** in settings states: `trigger_off()` commits and persists, `to_reverse()`
   discards and restores the old value. `on_motor_timeout` also cancels.
 - Imports of sibling states are done **inside methods**, not at module top — this breaks the circular
@@ -162,11 +170,13 @@ Conventions worth preserving:
 - **`IOEventSource`** (`controls/io_event_source.py`): raw GPIO → events (ACTIVATE, DEACTIVATE, HOLD,
   TAPPED 50–300 ms, LONG_HOLD >750 ms). Used for both pedals — `foot_pedal` (GPIO6) and
   `secondary_pedal` (GPIO7).
-- **Pump holders** (`pixel_pump.py`): the trigger button and the foot pedal are independent controls
-  that both run the vacuum, so `pump_trigger_press/release()` refcount them through a `_pump_holders`
-  set and only call `state.trigger_on()` / `trigger_off()` on the 0↔1 edge. Without it, "hold pedal,
-  tap button, release button" would stop the pump mid-pick. The pedal has no LEDs, so the trigger
-  button's feedback follows because both funnel into the same state intents.
+- **Pump holders** (`mapping.py`): the trigger button and the foot pedal are independent controls
+  that both run the vacuum, so `MappingEngine.pump_press/pump_release()` refcount them through a
+  `_pump_holders` set and only call `state.trigger_on()` / `trigger_off()` on the 0↔1 edge. Without
+  it, "hold pedal, tap button, release button" would stop the pump mid-pick. The pedal has no LEDs,
+  so the trigger button's feedback follows because both funnel into the same state intents.
+  Anything that starts the pump outside the table (the settings-menu path) must go through
+  `hold_pump()`, so `release_held()` can undo it — a holder that never drops silently kills the pedal.
 - **Delayed valve actions**: `valve.activate(delay_ms)` / `deactivate(delay_ms)` schedule against
   `tick()` — this is how reverse mode staggers its three valves (0/100/200 ms).
 - **Motor safety timeout**: 60 s, fires `on_timeout` → `state.on_motor_timeout()`.
@@ -187,6 +197,7 @@ Conventions worth preserving:
 | `usb/vendor_hid.py` | Vendor HID interface (usage page `0xFF00`), TX seq, host-activity tracking |
 | `usb/usb_manager.py` | Owns both HID interfaces, event queue, heartbeat, host command dispatch |
 | `usb/keyboard.py` | `KeyboardInterface` wrapper; translates stored HID usages to negative modifiers |
+| `mapping.py` | `MappingTable` (persisted table + the `USBManager` contract) and `MappingEngine` (dispatcher, pump refcount, remote-mode LEDs), plus the factory-reset gesture |
 | `communication_manager.py` | Serial command protocol over USB stdin (non-blocking `select.poll`) |
 | `settings_manager.py` | `settings.json` on device flash, with forward/backward key migration |
 | `boot_sequence.py` | Rainbow LED sweep + valve click sequence at startup |
@@ -252,13 +263,14 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
   not enough.
 - **Publish-all rule:** while the host is active, *every* control publishes EVENT frames, whatever it
   also does locally. The wiring lives in `pixel_pump.py`'s `on_button_event`, `on_foot_pedal_event`
-  and `on_aux_pedal_event`; buttons are keyed on `Button.title` via `_BUTTON_CONTROL_IDS` — rename a
-  button and it silently stops publishing.
+  and `on_aux_pedal_event`; buttons resolve through `_CONTROL_IDS_BY_BUTTON`, keyed on the `Button`
+  object itself.
 - Every control publishes the full gesture set: PRESS / RELEASE / TAP / HOLD / LONG_HOLD. HOLD is
   throttled to one frame per 120 ms per control in `USBManager`.
 - The trigger button (`TRIGGER_BTN`, GPIO13) and the foot pedal (`FPEDAL`, GPIO6) publish separately.
-- The four mapping commands answer `ERROR UNKNOWN_COMMAND` until Phase 4 supplies a table —
-  `USBManager(mapping=...)` is the seam, and its docstring is the contract that `mapping.py` must meet.
+- `USBManager(mapping=...)` is the seam to the mapping table, and its docstring is the contract
+  `MappingTable` implements. It is assigned after `PixelPumpStateMachine` exists (the table needs the
+  settings manager); until then the four mapping commands answer `ERROR UNKNOWN_COMMAND`.
 - `ENTER_BOOTLOADER` requires magic `0xB007`, `RESET_MAPPINGS` requires `0xDEFA`. A wrong magic is
   `ERROR BAD_MAGIC` and must never reboot the pump mid-assembly.
 - To watch the wire, `tools/phase3_wire_check.py` runs the outstanding Phase 3 checks interactively
@@ -266,6 +278,36 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
   `tools/usb-coms` gives a raw frame dump. **Either must be launched from Terminal** — macOS only
   opens a vendor HID interface for a process holding Input Monitoring, and refuses everything else
   with "exclusive access and device already open".
+
+## Mapping engine (`mapping.py`)
+
+Layer 1 of the spec's two-layer control model. A table keyed by `(control, gesture, slot)` holding
+`(action, param)`; layer 2 (intents, chords) lives in Board Factory and never reaches the firmware.
+
+- **Slots.** `STANDALONE` (0) applies unless `usb_manager.is_vendor_host_active()`, which selects
+  `CONNECTED` (1). Resolution happens per event, so a heartbeat timeout falls back instantly.
+- **Gestures** are not wire EventKinds: `PRESS`/`TAP`/`HELD`/`LONG_HOLD` (`DELTA_*` is encoder-only,
+  so PP1 rejects it). `HELD` is the only momentary one — `dispatch()` starts it on the PRESS edge and
+  `release_held()` undoes it on RELEASE, **replaying what the press recorded** rather than looking the
+  table up again. That is what makes a host remapping or disconnecting mid-hold safe.
+- **Defaults are classic PP1 behaviour in both slots**, so an updated pump acts like legacy firmware
+  until a host writes the CONNECTED column. LIFT/DROP/REVERSE on `PRESS`, LOW/HIGH on `TAP` — that
+  split is legacy fidelity, not taste.
+- **`SEND_KEY` param `0x00` on `FPEDAL_AUX` is a sentinel** meaning "the key + modifier the legacy
+  stdin protocol configured". The wire has no modifier byte by design. `GET_MAPPING` reports the
+  *resolved* keycode; storage keeps the sentinel, so `settings:set_secondary_pedal_key` keeps working.
+- **Persistence:** `SET_MAPPING` is RAM only, `COMMIT_MAPPINGS` writes flash. Only rows differing from
+  `DEFAULTS` are stored, under `settings.json`'s `mappings` key — which **must** stay in
+  `DEFAULT_SETTINGS` or `migrate_settings()` deletes it every boot. Corrupt rows are skipped, not
+  fatal.
+- **Settings menus suspend the engine** (`State.suspends_mapping`); `pixel_pump.py`'s
+  `_legacy_button_dispatch` handles buttons the legacy way until the menu exits. Pedals are not
+  suspended — see the plan doc's Phase 4 deviations.
+- **Remote-mode LED:** purple at `Brightness.DIMMER` on buttons whose active-slot gestures are all
+  `FORWARD`/`NONE`. Applied on transition, snapshotting and restoring the button's colour and pulsate
+  state; it deliberately does not fight the state machine afterwards.
+- **Factory reset:** LIFT + DROP held 3 s at power-on, checked before the boot sequence, resets the
+  table and flashes the LEDs white. This is the only way back from a table that forwards every button.
 
 ## Notes
 

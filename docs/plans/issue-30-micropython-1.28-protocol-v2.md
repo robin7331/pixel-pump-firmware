@@ -16,8 +16,8 @@ modernize the Pixel Pump 1 firmware so it works with Board Factory, then freeze 
 - **Status:** Phase 0 landed in `c7614cd`, Phase 1 in `ebeea4c`, Phase 2 in this branch and verified on
   a physical pump 2026-07-28 — see *Deviations* for what changed against this plan. Phase 3 landed in
   this branch the same day with its gate **half closed** — local behaviour verified on hardware, wire
-  level not. Phase 4 is next. All four open decisions were resolved 2026-07-28 — see *Decisions* at
-  the bottom.
+  level not. Phase 4 landed the same day, **not yet run on hardware at all**. Phase 5 is next. All four
+  open decisions were resolved 2026-07-28 — see *Decisions* at the bottom.
 
 Phases are sequenced so each one ends at something testable on real hardware, and so the riskiest
 unknowns get answered first. There is no test framework here — every gate is a manual check on a
@@ -218,12 +218,57 @@ wire stays free of modifiers.
 reading the table sees `0x00` and cannot tell the user what the pedal actually sends without speaking
 the legacy stdin protocol, which it does not.
 
+**Gate: nothing here has run on hardware yet.** Everything below was checked against a CPython harness
+(`tools/`-adjacent, not committed) that stubs `machine` / `utime` / `usb.device` and exercises the
+table, the dispatcher and `USBManager`'s five mapping commands — 51 assertions, all passing. That
+covers logic, not timing, LEDs or flash. The Phase 3 wire checks are still outstanding too, and Phase 4
+sits directly on those frames.
+
+### Deviations, as implemented *(2026-07-28)*
+
+1. **`PUMP_TOGGLE` and `VENT_PULSE` are implemented,** though this phase's dispatcher list omits them.
+   The spec's action registry marks both valid on *both* models, and PP1 expresses them trivially
+   (`PUMP_TOGGLE` via a pseudo-holder in the refcount, `VENT_PULSE` as the NC-valve pulse the drop
+   state already uses). Rejecting them with `BAD_ACTION` would have frozen a firmware that contradicts
+   the frozen spec. Neither appears in the default table.
+2. **Suspension covers buttons only, not the pedals.** The plan says "bypass the mapping engine
+   entirely"; the spec says "the legacy in-menu **button** behavior applies". Under the default table
+   the two readings are indistinguishable — `FPEDAL HELD → PUMP_TRIGGER` calls the same
+   `trigger_on/off` intents the menu commits on — and letting a *remapped* pedal keep its host mapping
+   inside a menu is the more defensible of the two. The suspended path lives in `pixel_pump.py` as
+   `_legacy_button_dispatch`.
+3. **Both paths share the HELD bookkeeping,** via `MappingEngine.hold_pump()`. Found while tracing:
+   if the trigger button is held inside a menu and the menu exits some *other* way — Reverse cancels
+   it, or the 60 s motor timeout drops it — the release then arrives on the mapping path, which had no
+   record of the press and so never dropped the pump holder. The refcount would sit permanently at 1,
+   silently killing the foot pedal until power-cycle. Recording the legacy press in `_held` makes
+   either path able to undo it. Regression-tested.
+4. **Remote-mode LED is applied once per transition, not held against the states.** Entering remote
+   mode snapshots the button's target colour and pulsate parameters, then paints `Colors.PURPLE` (new)
+   at `Brightness.DIMMER`; leaving restores the snapshot. It deliberately does not fight the state
+   machine afterwards: the only state that repaints a FORWARD button is pedal-driven `trigger_on/off`
+   on the trigger button, and green-while-pumping is the feedback you want there.
+   A button counts as remote only when *every* gesture on it is FORWARD or NONE — one that keeps e.g.
+   its long-press menu still does something locally, and the colour would lie.
+5. **`max_response_queue_size` 64 → 96** in `usb_manager.py`. A bulk `GET_MAPPING` of a fully populated
+   table is 8 controls × 2 slots × 4 gestures = 64 frames *plus* the terminator, and dropping the
+   terminator leaves the host waiting forever.
+6. **Two extra `settings_manager.py` fixes** beyond the `migrate_settings()` one this phase called for:
+   `initialize()` assigned `DEFAULT_SETTINGS` by reference, which with a mutable `mappings` value would
+   let a device write reach the module defaults; and `persist_settings()` now returns a bool, which is
+   what lets `commit()` / `reset()` answer `STORAGE_ERROR` honestly instead of always ACKing.
+
+Also worth knowing for Phase 5: `State.on_button_event`'s LOW/HIGH handling and `ReverseState`'s
+`on_button_event` override are both gone — the mapping engine owns those gestures now, and Reverse
+instead overrides the four power intents to no-ops to keep its `PowerMode.MAX` forcing intact.
+
 ---
 
 ## Phase 5 — Code health & docs
 
-- `is` → `==` sweep: `communication_manager.py`, `pixel_pump_state_machine.py`, `states/state.py`,
-  `controls/button.py`.
+- `is` → `==` sweep: `communication_manager.py`, `pixel_pump_state_machine.py`, `controls/button.py`,
+  and the three settings states. (`states/state.py` lost its `is` comparisons in Phase 4, when the
+  mapping engine took the LOW/HIGH handling off it.)
 - **[Decided 2026-07-28] In scope, and larger than it looks.** Fix `settings:set_power_mode`
   (`communication_manager.py:118`/`:121` read `power_mode.HIGH` off the *module*; the constants live on
   the `PowerMode` class inside it) **and** wrap `parse()` in `try`/`except`. Nothing catches exceptions

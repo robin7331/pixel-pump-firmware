@@ -5,6 +5,8 @@ from .state import State
 
 
 class HighPowerSettingsState(State):
+    suspends_mapping = True
+
     def __init__(self, device):
         super().__init__(device)
         self.old_power_setting = None

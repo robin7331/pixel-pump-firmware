@@ -244,14 +244,33 @@ the following are confirmed:
       `TAP → POWER_LOW → set_power_mode(LOW)`, flipping persisted `power_mode` 1 → 0
 - [x] publish-all survives the rewiring (see Phase 3's gate, run on this firmware)
 
-Still unverified on hardware, and all of it is Phase 4's real substance:
+Then `tools/phase4_wire_check.py` was run against it, closing most of the rest:
 
-- [ ] the five mapping commands over the wire — bulk `GET_MAPPING`, `SET_MAPPING`, `COMMIT_MAPPINGS`,
-      `RESET_MAPPINGS` round-trip
-- [ ] slot switching: CONNECTED while a host heartbeats, instant STANDALONE fallback on timeout
-- [ ] remote-mode LEDs (nothing defaults to `FORWARD`, so no run so far has painted one)
-- [ ] the factory reset gesture
-- [ ] the `SEND_KEY` sentinel actually typing the aux pedal's configured key
+- [x] bulk `GET_MAPPING` streams the 24-entry default table and terminates once
+- [x] single `GET_MAPPING` addresses cells and slots; unmapped cells read `NONE`
+- [x] the `SEND_KEY` sentinel is resolved on read — the aux pedal reports `0x11`/`0x52`, not `0x00`
+- [x] `BAD_CONTROL` / `BAD_GESTURE` (bad gesture *and* out-of-range slot) / `BAD_ACTION` (unknown, and
+      `PUMP_TRIGGER` on a non-HELD gesture) / `BAD_MAGIC`
+- [x] `SET_MAPPING` live in RAM and slot-scoped; `COMMIT_MAPPINGS` and `RESET_MAPPINGS` both ACK;
+      `RESET` restores the defaults
+- [x] the factory reset gesture — LIFT + DROP at power-on wiped a committed override
+
+Still open:
+
+- [ ] **slot switching and the remote-mode LED.** The first run reported these as failures, but the
+      result was *invalid*: every prompt in check F blocked, so no host heartbeat went out while the
+      operator read the question or reached for the button, and the device had dropped to STANDALONE
+      1200 ms in. All three symptoms — no purple LED, `FORWARD` ignored, LED never cleared — are
+      exactly what a STANDALONE pump looks like. Harness bug, not firmware. Fixed by beating the
+      heartbeat on a background thread and detecting presses from EVENT frames rather than an Enter
+      key; the press step now also *asserts* an EVENT frame arrived, since publish-all only emits
+      while the host is active, so "mapping respected" can no longer be confused with "connection
+      lapsed". **Needs a re-run.**
+- [ ] the aux pedal actually *typing* the configured key (check C proves the read path reports it,
+      not that the keystroke lands)
+- [ ] `COMMIT_MAPPINGS` persistence proven independently — check G's override was committed and then
+      wiped by the reset, which is also consistent with it never having reached flash. Reading
+      `settings.json` over CDC between the commit and the reset would settle it
 
 `tools/phase4_wire_check.py` covers all five. Checks A–E are automatic; F needs someone to look at the
 pump and press LIFT, and G needs a power cycle and is opt-in. It ends with `RESET_MAPPINGS`, so it

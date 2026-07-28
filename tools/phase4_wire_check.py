@@ -37,7 +37,9 @@ The pump is left on the default table: the run ends with RESET_MAPPINGS.
 """
 
 import glob
+import subprocess
 import sys
+import threading
 import time
 
 import hid
@@ -144,6 +146,34 @@ HOST_TIMEOUT_S = 1.2  # device drops to STANDALONE this long after the last writ
 # --------------------------------------------------------------- transport
 
 
+def warn_if_daemon_running():
+    """Board Factory's daemon holds the interface, and macOS blames permissions.
+
+    hidapi reports a held interface and a missing Input Monitoring grant with
+    the same message, which sends you to System Settings for a problem that is
+    not there. Say so up front instead.
+    """
+    try:
+        found = subprocess.run(
+            ["pgrep", "-fl", "pixel-pump-daemon"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:  # noqa: BLE001 - pgrep missing is not worth failing over
+        return
+    if found.returncode != 0 or not found.stdout.strip():
+        return
+    pid = found.stdout.split(None, 1)[0]
+    print(
+        f"!! Board Factory's pixel-pump-daemon is running (pid {pid}) and holds the\n"
+        "   vendor interface exclusively. Quit Board Factory, or kill that pid,\n"
+        "   before running this. Opening the device is about to fail with\n"
+        "   'exclusive access and device already open' -- which is NOT a\n"
+        "   permissions problem, whatever the message suggests.\n"
+    )
+
+
 def open_vendor_interface():
     paths = [d for d in hid.enumerate(VID, PID) if d["usage_page"] == VENDOR_USAGE_PAGE]
     if not paths:
@@ -180,48 +210,105 @@ def normalize(data):
 
 
 class Session:
-    """Vendor HID transport that keeps the host heartbeat alive."""
+    """Vendor HID transport that keeps the host heartbeat alive.
+
+    The heartbeat can run on a background thread, which matters more than it
+    sounds: the device drops to STANDALONE 1200 ms after the last host write,
+    and any prompt this tool puts on screen blocks for far longer than that.
+    Beating only from the main loop meant every interactive check silently
+    measured a disconnected pump.
+    """
 
     def __init__(self, device):
         self.device = device
         self.seq = 0
         self.next_heartbeat = 0.0
+        self._lock = threading.RLock()
+        self._keepalive_stop = None
+        self._keepalive_thread = None
 
     def heartbeat(self, force=False):
-        if not force and time.monotonic() < self.next_heartbeat:
+        with self._lock:
+            if not force and time.monotonic() < self.next_heartbeat:
+                return
+            stamp = int(time.monotonic() * 1000) & 0xFFFF
+            write_frame(
+                self.device,
+                bytes(
+                    (2, MSG_PING, self.seq, 0, 0, stamp & 0xFF, (stamp >> 8) & 0xFF, 0x80)
+                ),
+            )
+            self.seq = (self.seq + 1) & 0xFF
+            self.next_heartbeat = time.monotonic() + HEARTBEAT_INTERVAL_S
+
+    def start_keepalive(self):
+        """Hold the host active across blocking prompts."""
+        if self._keepalive_thread is not None:
             return
-        stamp = int(time.monotonic() * 1000) & 0xFFFF
-        write_frame(
-            self.device,
-            bytes((2, MSG_PING, self.seq, 0, 0, stamp & 0xFF, (stamp >> 8) & 0xFF, 0x80)),
-        )
-        self.seq = (self.seq + 1) & 0xFF
-        self.next_heartbeat = time.monotonic() + HEARTBEAT_INTERVAL_S
+        self.heartbeat(force=True)
+        self._keepalive_stop = threading.Event()
+
+        def run():
+            while not self._keepalive_stop.wait(0.1):
+                try:
+                    self.heartbeat()
+                except Exception:  # noqa: BLE001 - device went away; just stop
+                    return
+
+        self._keepalive_thread = threading.Thread(target=run, daemon=True)
+        self._keepalive_thread.start()
+
+    def stop_keepalive(self):
+        """Let the host time out on purpose."""
+        if self._keepalive_thread is None:
+            return
+        self._keepalive_stop.set()
+        self._keepalive_thread.join(timeout=1.0)
+        self._keepalive_thread = None
 
     def command(self, command_id, b4=0, b5=0, b6=0, b7=0):
-        write_frame(
-            self.device,
-            bytes((2, MSG_COMMAND, self.seq, command_id, b4, b5, b6, b7)),
-        )
-        self.seq = (self.seq + 1) & 0xFF
+        with self._lock:
+            write_frame(
+                self.device,
+                bytes((2, MSG_COMMAND, self.seq, command_id, b4, b5, b6, b7)),
+            )
+            self.seq = (self.seq + 1) & 0xFF
 
-    def read(self, timeout_s, want=None, beat=True):
-        """Next frame whose msg_type is in `want`, or None on timeout."""
+    def read(self, timeout_s, want=None, beat=True, match=None):
+        """Next frame whose msg_type is in `want` and that `match` accepts."""
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             if beat:
                 self.heartbeat()
             try:
-                data = self.device.read(REPORT_SIZE + 1, 50)
+                with self._lock:
+                    data = self.device.read(REPORT_SIZE + 1, 50)
             except hid.HIDException as exc:
                 print(f"  read failed: {exc}")
                 return None
             frame = normalize(data) if data else None
             if not frame:
                 continue
-            if want is None or frame[1] in want:
-                return frame
+            if want is not None and frame[1] not in want:
+                continue
+            if match is not None and not match(frame):
+                continue
+            return frame
         return None
+
+    def await_press(self, control, timeout_s=30.0):
+        """Wait for an EVENT PRESS on `control`.
+
+        Doubles as proof that the device considered the host active when the
+        button went down -- publish-all only emits while it does. Without that,
+        a check on a FORWARDed button cannot tell "the mapping was respected"
+        from "the connection had lapsed".
+        """
+        return self.read(
+            timeout_s,
+            want=(MSG_EVENT,),
+            match=lambda f: f[3] == control and f[4] == 1,  # EventKind.PRESS
+        )
 
     def idle(self, seconds, beat=True):
         deadline = time.monotonic() + seconds
@@ -229,7 +316,8 @@ class Session:
             if beat:
                 self.heartbeat()
             try:
-                self.device.read(REPORT_SIZE + 1, 50)
+                with self._lock:
+                    self.device.read(REPORT_SIZE + 1, 50)
             except hid.HIDException:
                 return
 
@@ -556,21 +644,29 @@ def check_slot_switch(session, probe):
     problems = []
 
     print("\nCHECK F -- slot switching and the remote-mode LED.")
-    if probe.available:
-        print("           Mode changes are read back over the CDC port.")
-    else:
-        print(f"           (no CDC probe: {probe.reason} -- falling back to asking)")
+    if not probe.available:
+        return report(
+            "F  slot switching and remote-mode LED",
+            [f"needs the CDC probe to judge local actions ({probe.reason})"],
+        )
+    print("           Mode changes are read back over the CDC port; button")
+    print("           presses are detected from EVENT frames, so there is no")
+    print("           Enter to press -- just use the pump when asked.")
 
-    # Park the pump in Drop so a stray switch to Lift is unambiguous.
-    print("\n    Setting up: putting the pump in Drop mode.")
-    set_mapping(session, DROP, CONNECTED, G_PRESS, A_MODE_DROP)
-    input("    Press the DROP button on the pump, then hit Enter. ")
-    session.idle(0.3)
-    before = probe.mode() if probe.available else None
-    if probe.available and before != 1:
-        print(f"    (pump reports mode {ModeProbe.MODES.get(before, before)}, wanted Drop)")
+    # A background heartbeat holds the host active while prompts block. Without
+    # it the device times out mid-question and every answer measures STANDALONE.
+    session.start_keepalive()
 
-    # Hand LIFT to the host in the CONNECTED slot only.
+    # Park the pump in Drop, so a stray switch to Lift is unambiguous.
+    print("\n    Setup: press the DROP button on the pump.")
+    if session.await_press(DROP) is None:
+        session.stop_keepalive()
+        return report("F  slot switching and remote-mode LED", ["no DROP press seen"])
+    time.sleep(0.4)
+    if probe.mode() != 1:
+        problems.append("could not park the pump in Drop mode")
+
+    # Hand LIFT to the host, in the CONNECTED slot only.
     for gesture in (G_PRESS, G_LONG_HOLD):
         frame = set_mapping(session, LIFT, CONNECTED, gesture, A_FORWARD)
         if frame is None or frame[1] != MSG_ACK:
@@ -580,35 +676,38 @@ def check_slot_switch(session, probe):
     if not ask("Is the LIFT button now a distinct purple/violet, unlike the others?"):
         problems.append("remote-mode LED did not appear on LIFT")
 
-    input("    Now press the LIFT button once, then hit Enter. ")
-    session.idle(0.3)
-    if probe.available:
-        after = probe.mode()
-        if after == 0:
-            problems.append(
-                "LIFT switched the pump to Lift mode while FORWARDed -- the host "
-                "and the device would both act on it"
-            )
-    elif ask("Did the pump switch to Lift mode? (it should NOT have)"):
-        problems.append("LIFT acted locally while FORWARDed")
+    print("\n    Now press the LIFT button once.")
+    seen = session.await_press(LIFT)
+    time.sleep(0.4)
+    if seen is None:
+        # No EVENT frame means the host was not active, so whatever the pump
+        # did next says nothing about the CONNECTED slot.
+        problems.append(
+            "no LIFT PRESS event arrived -- the host was not active, so this "
+            "check is inconclusive rather than failed"
+        )
+    elif probe.mode() == 0:
+        problems.append(
+            "LIFT switched the pump to Lift mode while FORWARDed and the host "
+            "was demonstrably active -- host and device would both act on it"
+        )
 
     # Let the host heartbeat lapse -> instant fallback to STANDALONE.
     print(f"\n    Going quiet for {HOST_TIMEOUT_S + 0.8:.1f} s to time the host out...")
+    session.stop_keepalive()
     session.idle(HOST_TIMEOUT_S + 0.8, beat=False)
 
     if not ask("Has the LIFT button gone back to its normal (unlit) look?"):
         problems.append("remote-mode LED did not clear on heartbeat timeout")
 
+    # No EVENT frames now -- the device stops publishing once the host is gone,
+    # which is itself the thing being tested. Fall back to Enter.
     input("    Press LIFT once more, then hit Enter. ")
-    if probe.available:
-        after = probe.mode()
-        if after != 0:
-            problems.append(
-                "LIFT did not switch to Lift mode after the host timed out -- "
-                "the STANDALONE fallback did not take"
-            )
-    elif not ask("Did the pump switch to Lift mode this time? (it SHOULD have)"):
-        problems.append("STANDALONE fallback did not take")
+    if probe.mode() != 0:
+        problems.append(
+            "LIFT did not switch to Lift mode after the host timed out -- the "
+            "STANDALONE fallback did not take"
+        )
 
     # Back to a clean table.
     session.heartbeat(force=True)
@@ -678,6 +777,7 @@ def check_factory_reset(session, device):
 
 
 def main():
+    warn_if_daemon_running()
     device = open_vendor_interface()
     print(f"Opened {device.manufacturer} {device.product}")
 

@@ -18,9 +18,15 @@ Two UF2s come out of every build:
 > from the build, but `src/pixel_pump/keyboard.py` still does `import usb_hid` at module scope and
 > `pixel_pump.py` imports it. **`firmware.uf2` therefore boots straight into an ImportError** until
 > the Phase 2 USB port lands. Only `firmware-blank.uf2` is usable right now.
+>
+> Phases 0 and 1 have landed; Phase 2 (the USB stack port) is next, and all open decisions are
+> resolved. Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
 
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.25, async). Different
-> architecture — don't copy patterns between them without checking.
+> architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept
+> in sync rather than reinvented: `docs/usb-communication.md` (the USB protocol spec — canonical copy
+> lives in PP2, never edit this one independently) and `src/pixel_pump/usb/`, which Phase 2 ports from
+> PP2's equivalent.
 
 ## Build & Development Commands
 
@@ -29,6 +35,10 @@ Two UF2s come out of every build:
 There is no local Makefile. Builds are the MicroPython rp2 port compiled against `boards/PIXEL_PUMP/`,
 natively — no Docker, no act. Needs `cmake` and Arm's toolchain (`brew install --cask gcc-arm-embedded`;
 the `arm-none-eabi-gcc` *formula* has no newlib and fails on a missing `nosys.specs`).
+
+**The checkout already exists at `./micropython`** — v1.28.0, submodules fetched, both variants built,
+~450 MB, ignored via `.gitignore`'s `/micropython`. Do not re-clone it; the disk runs close to full.
+The first two steps below are only for setting this up from scratch.
 
 ```bash
 git clone --depth 1 --branch v1.28.0 https://github.com/micropython/micropython.git
@@ -161,20 +171,23 @@ Conventions worth preserving:
 
 ## Hardware Pin Map
 
-Pins are hard-coded in `pixel_pump.py` (there is no `pins.csv` in this generation):
+`boards/PIXEL_PUMP/pins.csv` gives every GPIO a name, so `Pin.board.PUMP`, `Pin.board.UI_LED_DATA` and
+friends resolve in firmware built from this repo. The rp2 port picks the file up from the board dir
+automatically. The application code in `pixel_pump.py` still passes raw pin *numbers* — the names are
+available, not yet adopted:
 
-| GPIO | Function |
-|------|----------|
-| 2 | Normally-open valve |
-| 3 | Normally-closed valve (vent) |
-| 4 | Three-way valve |
-| 5 | Pump motor PWM (10 kHz) |
-| 6 | Foot pedal — wired as the trigger button's secondary switch |
-| 7 | Secondary foot pedal (`IOEventSource`, sends HID keys) |
-| 8 / 9 | Lift / Drop buttons |
-| 10 / 11 | High / Low buttons (note: High is 10, Low is 11) |
-| 12 / 13 | Reverse / Trigger buttons |
-| 14 | WS2812 data — 12 LEDs, two per button |
+| GPIO | `pins.csv` name | Function |
+|------|-----------------|----------|
+| 2 | `VALVE_NO` | Normally-open valve |
+| 3 | `VALVE_NC` | Normally-closed valve (vent) |
+| 4 | `VALVE_3W` | Three-way valve |
+| 5 | `PUMP` | Pump motor PWM (10 kHz) |
+| 6 | `FPEDAL` | Foot pedal — wired as the trigger button's secondary switch |
+| 7 | `FPEDAL_AUX` | Secondary foot pedal (`IOEventSource`, sends HID keys) |
+| 8 / 9 | `BTN_LIFT` / `BTN_DROP` | Lift / Drop buttons |
+| 10 / 11 | `BTN_HIGH` / `BTN_LOW` | High / Low buttons (note: High is 10, Low is 11) |
+| 12 / 13 | `BTN_REVERSE` / `TRIGGER_BTN` | Reverse / Trigger buttons |
+| 14 | `UI_LED_DATA` | WS2812 data — 12 LEDs, two per button |
 
 LED index → button: Lift 0/1, Drop 2/3, Low 4/5, High 6/7, Reverse 8/9, Trigger 10/11.
 

@@ -18,14 +18,13 @@ Two UF2s come out of every build:
 > both UF2s boot again. Phase 5 (code health & docs) is next, and all open decisions are resolved.
 > Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
 >
-> Phase 2 was verified on a physical pump on 2026-07-28. **Phase 3's gate is only half closed:** its
-> local behaviour was checked by hand the same day, but the wire-level half was not — that the foot
-> pedal publishes `FPEDAL` and not `TRIGGER_BTN`, that buttons emit `TAP`, and that the heartbeat
-> still reports model 1.
+> Phases 2 and 3 are verified on a physical pump (2026-07-28), wire checks included.
 >
-> **Phase 4 has not run on hardware at all.** Its logic was checked against a CPython harness that
-> stubs `machine`/`utime`/`usb.device`; nothing about timing, LEDs or flash writes is confirmed, and
-> it sits directly on Phase 3's unverified frames.
+> **Phase 4's gate is only partly closed.** The dev pump runs it, and boot, the `settings.json`
+> upgrade and local dispatch are confirmed. What is *not* exercised on hardware is most of what the
+> phase is for: the five mapping commands, slot switching, remote-mode LEDs, the factory reset gesture
+> and the aux pedal's `SEND_KEY` sentinel. The logic behind those passed a CPython harness only — see
+> the plan doc's Phase 4 gate for the checklist.
 
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.25, async). Different
 > architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept

@@ -14,10 +14,12 @@ modernize the Pixel Pump 1 firmware so it works with Board Factory, then freeze 
   the way they are. ~450 MB including build dirs. Do not re-clone; the disk runs close to full
   (12 GiB free, 98 %).
 - **Status:** Phase 0 landed in `c7614cd`, Phase 1 in `ebeea4c`, Phase 2 in this branch and verified on
-  a physical pump 2026-07-28 — see *Deviations* for what changed against this plan. Phase 3 landed in
-  this branch the same day with its gate **half closed** — local behaviour verified on hardware, wire
-  level not. Phase 4 landed the same day, **not yet run on hardware at all**. Phase 5 is next. All four
-  open decisions were resolved 2026-07-28 — see *Decisions* at the bottom.
+  a physical pump 2026-07-28 — see *Deviations* for what changed against this plan. Phase 3 landed the
+  same day and its gate is **closed**, wire checks included. Phase 4 landed the same day and is on the
+  dev pump; its gate is **partly closed** — boot, settings migration and local dispatch confirmed, but
+  none of the mapping commands, slot switching, remote LEDs or the factory reset have been exercised on
+  hardware. Phase 5 is next. All four open decisions were resolved 2026-07-28 — see *Decisions* at the
+  bottom.
 
 Phases are sequenced so each one ends at something testable on real hardware, and so the riskiest
 unknowns get answered first. There is no test framework here — every gate is a manual check on a
@@ -151,14 +153,24 @@ rides on the trigger button, so pedal presses publish as `TRIGGER_BTN` rather th
 pedal, aux-pedal keys all identical. This is where the accepted deviation appears: LOW/HIGH released
 between 300 and 750 ms now does nothing (legacy fired on any release).
 
-**Gate status 2026-07-28: local half passed, wire half outstanding.** Everything above was checked by
-hand on the dev pump, including the pedal/button interleave the refcount exists for. What was *not*
-checked is what the host sees, and it is the part this phase is really about:
+**Gate closed 2026-07-28.** The local half was checked by hand on the dev pump, including the
+pedal/button interleave the refcount exists for. The wire half — the part this phase is really about —
+was run with `tools/phase3_wire_check.py`, all four checks passing:
 
-- [ ] the foot pedal publishes `FPEDAL` (7) — and **no** frame leaks onto `TRIGGER_BTN` (15)
-- [ ] the trigger button publishes `TRIGGER_BTN` (15) and nothing onto `FPEDAL`
-- [ ] buttons emit `TAP`, ahead of `RELEASE` in the same tick
-- [ ] the heartbeat still reports model 1 with `HAS_MODEL`
+- [x] the foot pedal publishes `FPEDAL` (7) — and **no** frame leaks onto `TRIGGER_BTN` (15)
+- [x] the trigger button publishes `TRIGGER_BTN` (15) and nothing onto `FPEDAL`
+- [x] buttons emit `TAP`, ahead of `RELEASE` in the same tick
+- [x] the heartbeat still reports model 1 with `HAS_MODEL`
+
+Ran against the **Phase 4** firmware, not Phase 3's, so it doubles as proof that Phase 4's rewiring of
+publish-all (`_CONTROL_IDS_BY_BUTTON`, now keyed on the `Button` object rather than its title) kept
+every control reporting.
+
+Setup note for next time: the checks failed twice with hidapi's `exclusive access and device already
+open`, which the tool's own help text attributes to missing Input Monitoring. That was a red herring —
+**Board Factory's `pixel-pump-daemon` had the vendor interface open**, as a child of the running dev
+app. Quitting it freed the interface; the app respawns the daemon afterwards. Check `pgrep -fl
+pixel-pump-daemon` before blaming macOS permissions.
 
 `tools/phase3_wire_check.py` walks all four interactively and asserts the absence of the wrong control
 id, which PP2's `tools/usb-coms` cannot — a raw dump shows what arrived, not what should not have.
@@ -218,11 +230,30 @@ wire stays free of modifiers.
 reading the table sees `0x00` and cannot tell the user what the pedal actually sends without speaking
 the legacy stdin protocol, which it does not.
 
-**Gate: nothing here has run on hardware yet.** Everything below was checked against a CPython harness
-(`tools/`-adjacent, not committed) that stubs `machine` / `utime` / `usb.device` and exercises the
-table, the dispatcher and `USBManager`'s five mapping commands — 51 assertions, all passing. That
-covers logic, not timing, LEDs or flash. The Phase 3 wire checks are still outstanding too, and Phase 4
-sits directly on those frames.
+**Gate: partly closed 2026-07-28.** The logic was checked against a CPython harness (not committed)
+that stubs `machine` / `utime` / `usb.device` and exercises the table, the dispatcher and
+`USBManager`'s five mapping commands — 51 assertions, all passing. Then flashed to the dev pump, where
+the following are confirmed:
+
+- [x] boots, and the composite device enumerates (vendor HID `0xFF00`/`0x01` on interface 3, keyboard
+      on interface 2)
+- [x] **a real `settings.json` survives the upgrade** — brightness, mode, power settings and all four
+      pedal keys came through byte-identical, with `"mappings": []` added by `migrate_settings()`.
+      This is the Phase 6 acceptance item, and the reason the flash offset is frozen
+- [x] the dispatcher runs locally: five `LOW` taps during the Phase 3 wire check drove
+      `TAP → POWER_LOW → set_power_mode(LOW)`, flipping persisted `power_mode` 1 → 0
+- [x] publish-all survives the rewiring (see Phase 3's gate, run on this firmware)
+
+Still unverified on hardware, and all of it is Phase 4's real substance:
+
+- [ ] the five mapping commands over the wire — bulk `GET_MAPPING`, `SET_MAPPING`, `COMMIT_MAPPINGS`,
+      `RESET_MAPPINGS` round-trip
+- [ ] slot switching: CONNECTED while a host heartbeats, instant STANDALONE fallback on timeout
+- [ ] remote-mode LEDs (nothing defaults to `FORWARD`, so no run so far has painted one)
+- [ ] the factory reset gesture
+- [ ] the `SEND_KEY` sentinel actually typing the aux pedal's configured key
+
+A Phase 4 wire check along the lines of `tools/phase3_wire_check.py` is the obvious way to close these.
 
 ### Deviations, as implemented *(2026-07-28)*
 
@@ -294,8 +325,9 @@ From the issue's acceptance criteria:
 - [ ] Mapping read/write/commit/reset round-trips; heartbeat timeout restores STANDALONE instantly
 - [ ] Legacy stdin protocol still answers (`version:info`, `settings:dump`)
 - [ ] Factory reset gesture works
-- [ ] **Upgrade a unit carrying a real `settings.json` and confirm the file survives** — not listed
-      explicitly in the issue, but it is the entire reason the flash offset is frozen
+- [x] **Upgrade a unit carrying a real `settings.json` and confirm the file survives** — not listed
+      explicitly in the issue, but it is the entire reason the flash offset is frozen. Confirmed
+      2026-07-28 on the dev pump upgrading Phase 2/3 → Phase 4; see Phase 4's gate
 
 ---
 

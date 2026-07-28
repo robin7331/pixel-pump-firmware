@@ -414,9 +414,16 @@ argument" path and into `float(arguments[index])`, raising `IndexError` — whic
 ValueError` does not catch. Every `settings:set_*` command has this shape, so the whole family was one
 truncated line away from killing the pump.
 
-Left unfixed deliberately: the guard has already downgraded it from fatal to a printed message, and
-correcting the comparison changes what a malformed command *answers*, which is host-visible behaviour
-and wider than this phase's brief. Worth its own small change.
+**Fixed straight after, as its own commit.** The three comparisons became `<=`, matching
+`check_has_argument` above them, which had it right all along via `try`/`except IndexError`. All seven
+`settings:set_*` commands now answer `Missing argument` for a missing argument and `Invalid argument`
+for a malformed one, neither of which disturbs the stored value — verified on the dev pump, and in the
+CPython harness across all three checkers at the boundary (length `index` rejects, length `index + 1`
+accepts) plus every affected command.
+
+The guard stays regardless. It is what found this, and the class of bug it covers is larger than the
+one instance: the fix makes malformed input answer correctly, while the guard is what keeps *any*
+future mistake in a command handler from taking the pump down with it.
 
 ---
 

@@ -367,13 +367,9 @@ Pre-existing, and useful to know before touching the surrounding code:
   the ~12.4-day wraparound. Consistent across the codebase; match the surrounding style unless you're
   deliberately fixing it. New USB code uses `ticks_diff` as ported from PP2 — the two conventions
   coexist on purpose, and Phase 5 deliberately left the legacy side alone.
-- `CommunicationManager.check_valid_float_argument` and its int/hex siblings test
-  `len(arguments) < index` where they mean `<=`, so a **missing final argument** slips past the
-  "Missing argument" path into `float(arguments[index])` and raises `IndexError` — which their
-  `except ValueError` does not catch. Affects every `settings:set_*` command; confirmed on hardware
-  2026-07-28 with `settings:set_brightness` and no argument. Since Phase 5 this is contained by the
-  `try`/`except` in `tick()` and merely prints `Command failed: list index out of range`, rather than
-  killing the firmware. Still wrong, just no longer fatal.
+- Every `settings:set_*` command reports a missing argument as `Missing argument` and a malformed one
+  as `Invalid argument`, and neither disturbs the stored value. Confirmed on hardware 2026-07-28.
+  Keep it that way: these are the answers a host parses.
 - Comparisons are `==` on values and `is` only on objects, as of Phase 5. The surviving `is` compare
   `Button` *instances* (`btn is self.device.low_button`) and are correct as identity. Don't
   reintroduce `is` against ints, strings or enum constants: it happened to work for small ints and
@@ -390,3 +386,8 @@ Fixed in Phase 5, listed because the symptoms are worth recognising if they resu
   `tick()` now wraps `parse()` in `try`/`except Exception`, which covers the whole class of
   malformed-input bugs. `SystemExit` derives from `BaseException` in MicroPython
   (`py/objexcept.c:306`), so `reset:soft` still exits through the guard.
+- `check_valid_float_argument` and its int/hex siblings tested `len(arguments) < index` where they
+  meant `<=`, so a **missing final argument** slipped past the "Missing argument" path into
+  `float(arguments[index])` and raised `IndexError`, which their `except ValueError` does not catch.
+  Every `settings:set_*` command had that shape — each was one truncated line away from killing the
+  firmware. Found by the guard above within minutes of it landing.

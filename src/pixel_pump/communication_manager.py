@@ -192,8 +192,12 @@ class CommunicationManager:
             print("Missing argument")
             return False
 
+    # The three below want `<=`, not `<`: index is an index, so a list of
+    # length `index` stops one short of it. With `<`, a missing *final*
+    # argument slipped past the guard into the conversion, raising IndexError
+    # -- which `except ValueError` does not catch, so it escaped the parser.
     def check_valid_float_argument(self, arguments, index):
-        if len(arguments) < index:
+        if len(arguments) <= index:
             print("Missing argument")
             return False
         try:
@@ -204,7 +208,7 @@ class CommunicationManager:
             return False
         
     def check_valid_int_argument(self, arguments, index):
-        if len(arguments) < index:
+        if len(arguments) <= index:
             print("Missing argument")
             return False
         try:
@@ -215,7 +219,7 @@ class CommunicationManager:
             return False
         
     def check_valid_hex_argument(self, arguments, index):
-        if len(arguments) < index:
+        if len(arguments) <= index:
             print("Missing argument")
             return False
         try:

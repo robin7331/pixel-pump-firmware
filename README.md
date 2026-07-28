@@ -245,8 +245,8 @@ src/pixel_pump/
   communication_manager.py      Serial command parser
   settings_manager.py           settings.json persistence
 
-boards/PIXEL_PUMP/              MicroPython board definition and freeze manifests
-drivers/rp2_hid/                Legacy USB HID patch — no longer applied by the build
+boards/PIXEL_PUMP/              MicroPython board definition, pin names and freeze manifests
+docs/usb-communication.md       USB protocol spec (canonical copy lives in the Pixel Pump 2 repo)
 tools/generateVersionFile.py    Writes version.py from git metadata (runs in CI)
 tools/checkFirmwareSize.sh      Fails if an image would overrun the littlefs partition
 ```

@@ -214,8 +214,8 @@ settings:set_secondary_pedal_long_key[_modifier]:<hex>
 - The CPU is deliberately underclocked to 96 MHz, and QSPI pads are set to 2 mA / slow slew in
   `pixel_pump.py` — both are EMI/noise measures. The large register-address constant block at the top
   of that file is mostly unused; only `SetPadQSPI` reads from it.
-- `usb_hid` is **gone**. It only ever existed via the patch in `drivers/rp2_hid/`, which the build no
-  longer applies; that directory is dead weight awaiting deletion in Phase 1. USB is now runtime-
+- `usb_hid` is **gone**. It only ever existed via the patch in `drivers/rp2_hid/`, which the build
+  stopped applying in Phase 0; the directory itself was deleted in Phase 1. USB is now runtime-
   configured through micropython-lib's `usb.device` (frozen into both images), so HID work goes
   through `usb.device.hid` / `usb.device.keyboard`, not `import usb_hid`.
 - Motor duty is stored 0–255 (`percentage * 2.55`) and then **squared** into 16-bit in `Motor.tick()`

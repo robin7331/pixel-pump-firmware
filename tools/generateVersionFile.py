@@ -31,10 +31,21 @@ def get_git_info(repo_path):
 
     return tag, commit_hash, branch, formatted_timestamp
 
+def parse_version(tag):
+    # "v0.0.8" -> ((0, 0, 8), False); "v0.0.2-1-gb834232" -> ((0, 0, 2), True)
+    match = re.match(r'^v(\d+)\.(\d+)\.(\d+)(?:-(\d+)-g[0-9a-f]+)?$', tag)
+    if not match:
+        return (0, 0, 0), True
+    version_tuple = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    dev = match.group(4) is not None
+    return version_tuple, dev
+
 def generate_version_file(output_path, repo_path):
     tag, commit_hash, branch, formatted_timestamp = get_git_info(repo_path)
+    version_tuple, dev = parse_version(tag)
     print ('Version information:')
     print (f'Tag: {tag}')
+    print (f'Version: {version_tuple} (dev build: {dev})')
     print (f'Branch: {branch}')
     print (f'Commit hash: {commit_hash}')
     print (f'Timestamp: {formatted_timestamp}')
@@ -43,6 +54,8 @@ tag = "{tag}"
 branch = "{branch}"
 commit_hash = "{commit_hash}"
 timestamp = "{formatted_timestamp}"
+version_tuple = {version_tuple}
+dev = {dev}
 '''
 
     with open(output_path, 'w') as f:

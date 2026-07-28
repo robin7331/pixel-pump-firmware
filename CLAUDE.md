@@ -14,9 +14,13 @@ Two UF2s come out of every build:
 - `firmware-blank.uf2` — MicroPython plus the USB stack, without `src/`. Flash this for development,
   then push `src/` over USB.
 
-> ⚠️ **Branch `firmware-v2` is mid-migration (issue #30, `docs/plans/`).** Phases 0–5 have landed, so
-> both UF2s boot again. Phase 6 (the acceptance pass on hardware) is next, and all open decisions are
-> resolved. Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
+> ⚠️ **Branch `firmware-v2` carries issue #30 (`docs/plans/`), and the firmware work is done.**
+> Phases 0–6 have landed, both UF2s boot, and every acceptance item that this repo can close is
+> closed — all three wire checkers pass on the dev pump. Two items stay open by their nature, neither
+> of them firmware: a side-by-side against a legacy unit (only one pump exists) and Board Factory
+> displaying the model (`board-factory#4` — the device already sends it correctly). Phase 7
+> (distribution) is deferred to its own issue. What remains is push, PR against `dev`, release.
+> Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
 >
 > Phases 2, 3 and 4 are all verified on a physical pump (2026-07-28), wire checks included —
 > `tools/phase3_wire_check.py` and `tools/phase4_wire_check.py` both pass end to end. Two narrow gaps

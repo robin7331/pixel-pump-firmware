@@ -17,9 +17,10 @@ modernize the Pixel Pump 1 firmware so it works with Board Factory, then freeze 
   a physical pump 2026-07-28 — see *Deviations* for what changed against this plan. Phase 3 landed the
   same day and its gate is **closed**, wire checks included. Phase 4 landed the same day, is on the dev
   pump, and its gate is **closed too** — `tools/phase4_wire_check.py` passes end to end, bar two narrow
-  gaps noted under that phase. Phase 5 landed the same day; it has no gate of its own and is verified
-  by Phase 6, which is next and is the last phase in this issue. All four open decisions were resolved
-  2026-07-28 — see *Decisions* at the bottom.
+  gaps noted under that phase. Phase 5 landed the same day, and **Phase 6 closed the same day too** —
+  `tools/phase6_acceptance.py` passes all four checks, so every acceptance item this repo can close is
+  closed. The two that remain open are not firmware work (see Phase 6). All four open decisions were
+  resolved 2026-07-28 — see *Decisions* at the bottom.
 
 Phases are sequenced so each one ends at something testable on real hardware, and so the riskiest
 unknowns get answered first. There is no test framework here — every gate is a manual check on a
@@ -451,11 +452,16 @@ From the issue's acceptance criteria:
       `const PUMP_MODEL = 'Pixel Pump 2'`, with a comment saying the telemetry carries no product
       string. Written when a PP2 was the only pump there was. `board-factory#4` covers exactly this
       (daemon: "parse model ID from device heartbeats (byte 3 when flag `0x08` set)"; app: a profile
-      registry keyed by model ID), so the item closes when that lands. The device half is provable
-      today with `tools/phase6_acceptance.py` checks A and B, and `phase3_wire_check.py` already
-      confirmed the heartbeat carries model 1 with `HAS_MODEL`
-- [ ] `ENTER_BOOTLOADER` (magic `0xB007`) lands the device in BOOTSEL — `tools/phase6_acceptance.py`
-      check D covers it; not yet run, because the daemon held the interface
+      registry keyed by model ID), so the item closes when that lands. **The device half is proven**
+      — `tools/phase6_acceptance.py` checks A and B passed 2026-07-28: `GET_INFO` answers model 1 and
+      protocol level 2 with `HAS_MODEL`, the heartbeat agrees on the model, and `GET_VERSION` agrees
+      with both the heartbeat and the legacy `version:info` over CDC. What remains is entirely the
+      app reading what the pump already sends
+- [x] `ENTER_BOOTLOADER` (magic `0xB007`) lands the device in BOOTSEL — `tools/phase6_acceptance.py`
+      checks C and D, 2026-07-28, both passing. C is the half worth having: a wrong magic answers
+      `BAD_MAGIC` and the pump keeps heartbeating afterwards with no BOOTSEL volume appearing, which
+      is what stops a spurious reboot mid-assembly. D then rebooted it for real and `/Volumes/RPI-RP2`
+      mounted. Recovered by copying the UF2 back across; `settings.json` survived that too
 - [x] Mapping read/write/commit/reset round-trips; heartbeat timeout restores STANDALONE instantly —
       `tools/phase4_wire_check.py`, 2026-07-28
 - [x] Legacy stdin protocol still answers — re-earned on the Phase 5 build 2026-07-28, after that
@@ -496,17 +502,23 @@ when an open fails — the hidapi error is identical to the missing-Input-Monito
 
 ### Where this leaves issue #30
 
-Everything in this repo is done. The three unticked items above are **not firmware work**:
+**Every firmware item is closed.** `tools/phase6_acceptance.py` passed all four checks on 2026-07-28,
+which was the last thing anyone still had to run. The two items that are not ticked are not firmware
+work and cannot become ticked here:
 
-| Item | Blocked on | Closable by |
-|------|-----------|-------------|
+| Item | Why it stays open | Closable by |
+|------|-------------------|-------------|
 | Legacy-identical | only one pump exists | nothing here — substituted, see above |
-| Daemon reports model 1 | `board-factory#4` | that issue landing |
-| `ENTER_BOOTLOADER` | nobody has run it yet | `tools/phase6_acceptance.py`, 30 seconds |
+| Daemon reports model 1 | `board-factory#4`; the device half is proven | that issue landing |
 
 So the honest state is: **PP1 firmware is finished and verified as far as one pump and this repo
 allow.** Freezing it does not wait on `board-factory#4` — that issue changes what the *app* displays,
-not what the firmware sends, and the firmware's side of that contract is already proven on the wire.
+not what the firmware sends, and the firmware's side of that contract is proven on the wire by checks
+A and B.
+
+What is left before the repo can be called done is process rather than engineering: push
+`firmware-v2`, open the PR against `dev` so CI builds both UF2s and runs the size check on a clean
+machine, and cut a release. Phase 7 (distribution) is already deferred to its own issue.
 
 ---
 

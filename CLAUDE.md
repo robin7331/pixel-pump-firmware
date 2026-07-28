@@ -54,7 +54,7 @@ hard-errors on `MICROPY_BOARD_VARIANT`.
 640 KiB firmware / 1408 KiB littlefs, but `memmap_mp_rp2040.ld` is handed the *whole* 2 MB — an
 oversized image links silently and then overwrites the filesystem, `settings.json` included, on first
 boot. The boundary cannot move without wiping every unit in the field, so this check is the only
-guard. CI runs it as a hard failure. Current usage: 345,808 B blank / 375,072 B full, ~57 % of ceiling.
+guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 375,416 B full, ~57 % of ceiling.
 
 | Workflow | Job | Trigger | Release |
 |----------|-----|---------|---------|

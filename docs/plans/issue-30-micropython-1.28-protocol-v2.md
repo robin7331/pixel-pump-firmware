@@ -8,6 +8,13 @@ modernize the Pixel Pump 1 firmware so it works with Board Factory, then freeze 
 - **Canonical protocol spec:** `pixel-pump-two-firmware` → `docs/usb-communication.md` (a verbatim
   copy lands in this repo as part of Phase 1)
 - **Host to test against:** `board-factory/rust/pixel-pump-daemon/`
+- **Build environment:** `./micropython` — a v1.28.0 checkout with the rp2 submodules (pico-sdk,
+  tinyusb, micropython-lib) fetched and both variants built, set up 2026-07-28. In-repo and already
+  covered by `.gitignore`'s `/micropython`, which is why the build commands in `CLAUDE.md` are written
+  the way they are. ~450 MB including build dirs. Do not re-clone; the disk runs close to full
+  (12 GiB free, 98 %).
+- **Status:** Phase 0 landed in `c7614cd`, Phase 1 in `ebeea4c`. Phase 2 is next. All four open
+  decisions were resolved 2026-07-28 — see *Decisions* at the bottom.
 
 Phases are sequenced so each one ends at something testable on real hardware, and so the riskiest
 unknowns get answered first. There is no test framework here — every gate is a manual check on a
@@ -15,7 +22,7 @@ physical pump.
 
 ---
 
-## Phase 0 — De-risk: does runtime USB work on RP2040 at v1.28, and does it still fit?
+## Phase 0 — De-risk: does runtime USB work on RP2040 at v1.28, and does it still fit? *(landed `c7614cd`)*
 
 Nothing else is worth building until this is answered.
 
@@ -36,7 +43,7 @@ Nothing else is worth building until this is answered.
 
 ---
 
-## Phase 1 — Toolchain & board files
+## Phase 1 — Toolchain & board files *(landed `c7614cd` + `ebeea4c`)*
 
 - `boards/PIXEL_PUMP/`: split the manifests PP2-style —
   - `manifest_shared.py` — port manifest + `require("usb-device")`, `require("usb-device-hid")`,
@@ -129,10 +136,16 @@ timeout.
 - **Factory reset gesture:** poll GPIO8 + GPIO9 raw at power-on for 3 s, before the boot sequence →
   reset mappings to defaults, persist, LED flash confirm.
 
-**[Decision needed]** The spec's PP1 defaults say `FPEDAL_AUX TAP → SEND_KEY(<legacy configured key>)`,
-but `SEND_KEY` carries no modifier by design, while PP1's stdin protocol configures one. Proposal:
+**[Decided 2026-07-28]** The spec's PP1 defaults say `FPEDAL_AUX TAP → SEND_KEY(<legacy configured key>)`,
+but `SEND_KEY` carries no modifier by design, while PP1's stdin protocol configures one (four settings
+keys: `secondary_pedal_key`/`_modifier` and `secondary_pedal_long_key`/`_modifier`). Resolution:
 **param `0x00` on FPEDAL_AUX means "use the legacy settings key + modifier"**; any non-zero param is a
-literal keycode from the host. Keeps the old tooling meaningful without adding modifiers to the wire.
+literal keycode from the host. `0x00` is already a no-op as a HID keycode, so nothing is lost, and the
+wire stays free of modifiers.
+
+`GET_MAPPING` **reports the resolved keycode** while storage keeps the sentinel. Otherwise a daemon
+reading the table sees `0x00` and cannot tell the user what the pedal actually sends without speaking
+the legacy stdin protocol, which it does not.
 
 ---
 
@@ -140,9 +153,13 @@ literal keycode from the host. Keeps the old tooling meaningful without adding m
 
 - `is` → `==` sweep: `communication_manager.py`, `pixel_pump_state_machine.py`, `states/state.py`,
   `controls/button.py`.
-- **[Decision needed]** Also fix `settings:set_power_mode` (`power_mode.HIGH` on the *module* →
-  `PowerMode.HIGH`)? It raises `AttributeError` today, it is a two-line fix in a file already being
-  edited, but it is technically a separate known rough edge.
+- **[Decided 2026-07-28] In scope, and larger than it looks.** Fix `settings:set_power_mode`
+  (`communication_manager.py:118`/`:121` read `power_mode.HIGH` off the *module*; the constants live on
+  the `PowerMode` class inside it) **and** wrap `parse()` in `try`/`except`. Nothing catches exceptions
+  between `tick()` (`communication_manager.py:228-232`) and the bare `while True:` in `pixel_pump.py`,
+  so today's `AttributeError` does not just fail the command — it unwinds out of the main loop and
+  kills the firmware until power-cycle. The typo is one instance; the guard covers the class. This
+  matters more from Phase 2 on, with a daemon on the other end of that port.
 - Leave the `ticks_ms()` wraparound alone in legacy code (matches surrounding style); new USB code
   uses `ticks_diff` as ported.
 - Update `README.md` (stale `act` job names, deleted `tools/*.py` → mpremote) and `CLAUDE.md` (no HID
@@ -166,19 +183,27 @@ From the issue's acceptance criteria:
 
 ---
 
-## Phase 7 — Distribution *(proposed: defer)*
+## Phase 7 — Distribution *(deferred 2026-07-28 to its own issue)*
 
 Publish workflow + website feed analogous to `pixel_pump_publish.yml` in the PP2 repo, so Board
-Factory can auto-update PP1 firmware. Needs a website-side ingest endpoint, so it is separable —
-cleaner as its own issue once the firmware lands.
+Factory can auto-update PP1 firmware. Deferred because all three prerequisites live outside this repo:
+a website ingest endpoint on a new path, a `PIXEL_PUMP_FIRMWARE_RELEASE_TOKEN` secret, and Board
+Factory teaching to consume the PP1 feed. Bundling it would block this issue on the website shipping,
+while every other phase gates only on hardware.
+
+Accepted cost: this issue ends with PP1 frozen, so the follow-up reopens a frozen repo. Adding a CI
+workflow touches no firmware and does not re-trigger the Phase 6 hardware acceptance pass.
 
 ---
 
 ## Cross-repo note
 
-PP2's `protocol.py` is still `PROTOCOL_VERSION = 1` with no `MAPPING` / `GET_INFO`. Proposal: author
-v2 here first and back-port the file to PP2 under `pixel-pump-two-firmware#4`, keeping the two copies
-byte-identical. Needs confirmation that PP1 is the reference implementation.
+PP2's `protocol.py` is still `PROTOCOL_VERSION = 1` with no `MAPPING` / `GET_INFO`. **Decided
+2026-07-28:** author v2 here first and back-port the file to PP2 under `pixel-pump-two-firmware#4`,
+keeping the two copies byte-identical. v2 gets written where it is actually exercised — PP1 is the repo
+with a daemon to test against — but **PP2 becomes the canonical owner once the back-port lands**, since
+PP1 freezes at the end of this issue. Same split as `docs/usb-communication.md`: written for both,
+canonical home in PP2.
 
 ### USB product ID allocation *(decided 2026-07-28)*
 
@@ -202,10 +227,11 @@ it found. Only one pump may be connected at a time until PP2 moves.
 
 ---
 
-## Open decisions
+## Decisions *(all resolved 2026-07-28)*
 
-1. `SEND_KEY` param `0x00` as the "use legacy configured key + modifier" sentinel for FPEDAL_AUX
-   (Phase 4).
-2. Whether the `settings:set_power_mode` `AttributeError` is in scope (Phase 5).
-3. Whether Phase 7 (distribution) belongs in this issue or a follow-up.
-4. Whether PP1 is the reference implementation for protocol v2, with a back-port to PP2.
+1. **`SEND_KEY` sentinel** — param `0x00` on FPEDAL_AUX means "use the legacy configured key +
+   modifier"; `GET_MAPPING` reports the resolved keycode while storage keeps the sentinel. See Phase 4.
+2. **`settings:set_power_mode`** — in scope, together with a `try`/`except` guard around `parse()`, since
+   the bug currently kills the main loop rather than just failing the command. See Phase 5.
+3. **Phase 7 (distribution)** — deferred to its own issue; prerequisites are all outside this repo.
+4. **Protocol v2 authorship** — written here, back-ported to PP2, which then owns it.

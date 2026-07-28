@@ -435,12 +435,43 @@ From the issue's acceptance criteria:
       100/200 ms sequencing, pedal, keyboard emulation)
 - [ ] Daemon connects, reports model 1 + firmware version, receives button events
 - [ ] `ENTER_BOOTLOADER` (magic `0xB007`) lands the device in BOOTSEL
+
+`tools/phase6_acceptance.py` covers the device half of the middle item and all of the last one:
+
+- **Check A** — `GET_VERSION`, cross-checked three ways. The ACK, the device heartbeat and the legacy
+  `version:info` over CDC must agree. The CDC route is worth the trouble because it reads `version.py`
+  without passing through the HID stack at all, so agreement means something. On a local build the tag
+  is `local` and the wire reads `0.0.0`; the check says so rather than failing.
+- **Check B** — `GET_INFO` reports model 1 and protocol level 2 with `HAS_MODEL`, and the heartbeat
+  agrees on the model.
+- **Check C** — `ENTER_BOOTLOADER` with a wrong magic answers `BAD_MAGIC` **and the pump keeps
+  running**. The error frame alone does not prove that; a device that answers correctly and reboots
+  anyway is exactly the failure the magic exists to prevent, so the check also waits out the 100 ms
+  flush delay, confirms the pump still heartbeats, and confirms no BOOTSEL volume appeared.
+- **Check D** — the real magic ACKs and `/Volumes/RPI-RP2` mounts. Opt-in and last, since it reboots
+  the pump; recovery is a power cycle.
+
+It shares its transport with `phase4_wire_check.py` by importing from it — `Session` (with the
+background heartbeat), `ModeProbe`, `expect_error`, the daemon warning — rather than duplicating two
+hundred lines. `ModeProbe` gained a `version_info()` method for check A; that is additive, so the
+Phase 4 tool is unaffected.
+
+**What no script can close**, and what therefore still needs a human:
+
+- *Legacy-identical out of the box* wants a legacy unit next to an updated one. One pump cannot answer
+  it, and the closest honest substitute is the by-hand pass already done in Phase 5.
+- *The daemon connects* is a claim about Board Factory, not about the firmware. Check A and B prove the
+  device answers correctly; whether the app is happy with those answers is a different question and
+  only the app can settle it. Note the daemon holds the vendor interface exclusively, so the two cannot
+  be observed at the same time — quit Board Factory before running any checker, and `pgrep -fl
+  pixel-pump-daemon` when the open fails.
 - [x] Mapping read/write/commit/reset round-trips; heartbeat timeout restores STANDALONE instantly —
       `tools/phase4_wire_check.py`, 2026-07-28
-- [ ] Legacy stdin protocol still answers (`version:info`, `settings:dump`) — both confirmed on the
-      Phase 4 build 2026-07-28, but **re-check on the Phase 5 build**: that phase rewrote the command
-      dispatch these arrive through, from `is` to `==`. Add `settings:set_power_mode:high|low`, which
-      Phase 5 fixed and which has never once worked on hardware
+- [x] Legacy stdin protocol still answers — re-earned on the Phase 5 build 2026-07-28, after that
+      phase rewrote the dispatch these arrive through from `is` to `==`. `version:info` and
+      `settings:dump` answer, `settings:set_power_mode:high|low` works for the first time, and every
+      `settings:set_*` reports `Missing argument` / `Invalid argument` without disturbing the stored
+      value or the main loop
 - [x] Factory reset gesture works — `tools/phase4_wire_check.py` check G, 2026-07-28
 - [x] **Upgrade a unit carrying a real `settings.json` and confirm the file survives** — not listed
       explicitly in the issue, but it is the entire reason the flash offset is frozen. Confirmed
@@ -469,6 +500,24 @@ keeping the two copies byte-identical. v2 gets written where it is actually exer
 with a daemon to test against — but **PP2 becomes the canonical owner once the back-port lands**, since
 PP1 freezes at the end of this issue. Same split as `docs/usb-communication.md`: written for both,
 canonical home in PP2.
+
+**Handed over 2026-07-28.** The back-port is ticketed rather than done, since it is PP2's repo and PP2's
+release to make:
+
+- **`pixel-pump-two-firmware#4`** — commented with what changed against its original plan: `protocol.py`
+  is written and hardware-verified and should be copied verbatim; `MODEL_ID` is *not* in it (`ModelId`
+  0/1/2 is, and the encoders take `model_id`, defaulting to `UNKNOWN` so the legacy heartbeat shape is
+  reproduced exactly); `ErrorCode` has no `BAD_SLOT`, so an out-of-range slot reports `BAD_GESTURE`;
+  `max_response_queue_size` must be recomputed for PP2's larger table rather than copying PP1's 96; and
+  the five mapping commands can ship before the engine, answering `UNKNOWN_COMMAND` until a table is
+  attached.
+- **`pixel-pump-two-firmware#5`** *(new)* — the `vendor_hid.tick()` host-activity bug from Phase 2's
+  deviation 2, which PP2 still carries. Filed separately because it is a bug in shipped v1 behaviour
+  with a four-line fix and no dependency on v2. It is also worse there than it was here: PP2's
+  `publish_event` still falls back to `_emit_keyboard_fallback` when no host is active, so the window
+  the bug creates does not drop an event — it **types a keystroke into whatever app has focus** at
+  connect time. Worth taking before #4, whose item 4 deletes that fallback and so changes the symptom
+  without fixing the cause.
 
 ### USB product ID allocation *(decided 2026-07-28)*
 

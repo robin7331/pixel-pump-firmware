@@ -163,14 +163,19 @@ while connected. Should you ever end up with a table that forwards everything an
 **hold Lift + Drop while powering on** for three seconds: the LEDs flash white and the table is back
 to defaults.
 
-Two interactive checkers live in `tools/` for poking at this from a developer machine. Both need the
-vendor interface, which macOS only hands to a process holding Input Monitoring, so run them from
-Terminal rather than an IDE:
+Three checkers live in `tools/` for poking at this from a developer machine — controls and gestures,
+the mapping table, and the version/model/bootloader commands. All need the vendor interface, which
+macOS only hands to a process holding Input Monitoring, so run them from Terminal rather than an IDE,
+and quit Board Factory first (its daemon holds the interface exclusively):
 
 ```bash
 DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid python tools/phase3_wire_check.py
 DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/phase4_wire_check.py
+DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/phase6_acceptance.py
 ```
+
+The last one ends by offering to reboot the pump into the bootloader, which is the only way to test
+that command for real. Say no and it skips it; say yes and a power cycle brings the pump back.
 
 ## Building
 
@@ -283,6 +288,7 @@ docs/usb-communication.md       USB protocol spec (canonical copy lives in the P
 tools/generateVersionFile.py    Writes version.py from git metadata (runs in CI)
 tools/checkFirmwareSize.sh      Fails if an image would overrun the littlefs partition
 tools/phase*_wire_check.py      Interactive checks against a pump over USB (see below)
+tools/phase6_acceptance.py      Version, model and bootloader-command checks
 ```
 
 There's no test suite and no linter — testing is done by hand, on hardware.

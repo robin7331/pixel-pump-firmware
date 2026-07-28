@@ -363,11 +363,13 @@ def bulk_dump(session, timeout_s=6.0):
 
 
 class ModeProbe:
-    """Reads `mode` out of settings.json over the CDC port.
+    """Reads the legacy stdin protocol over the CDC port.
 
     The vendor interface cannot answer "did the button act locally" -- under
     publish-all the EVENT frame goes out whether the action ran or not. This
-    can.
+    can. It is also a route to the firmware version that does not pass through
+    the HID stack at all, which is what makes it worth cross-checking against
+    (see tools/phase6_acceptance.py).
     """
 
     MODES = {0: "Lift", 1: "Drop", 2: "Reverse"}
@@ -414,6 +416,25 @@ class ModeProbe:
                 line = line.strip()
                 if line.startswith("{"):
                     return json.loads(line).get("mode")
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
+    def version_info(self):
+        """`version:info` -> "tag,branch,commit_hash,timestamp", or None."""
+        if not self.available:
+            return None
+        try:
+            self.serial.reset_input_buffer()
+            self.serial.write(b"version:info\r\n")
+            self.serial.flush()
+            time.sleep(0.8)
+            raw = self.serial.read(self.serial.in_waiting or 1).decode(errors="replace")
+            for line in raw.splitlines():
+                line = line.strip()
+                # Four comma-separated fields, and not the settings JSON.
+                if line and not line.startswith("{") and line.count(",") == 3:
+                    return line
         except Exception:  # noqa: BLE001
             return None
         return None

@@ -270,13 +270,18 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
   settings manager); until then the four mapping commands answer `ERROR UNKNOWN_COMMAND`.
 - `ENTER_BOOTLOADER` requires magic `0xB007`, `RESET_MAPPINGS` requires `0xDEFA`. A wrong magic is
   `ERROR BAD_MAGIC` and must never reboot the pump mid-assembly.
-- To watch the wire, two interactive checkers live in `tools/` — `phase3_wire_check.py` (control ids,
-  gestures, heartbeat model) and `phase4_wire_check.py` (the mapping commands, slot switching,
-  remote-mode LED, factory reset). PP2's `tools/usb-coms` gives a raw frame dump.
+- To watch the wire, three interactive checkers live in `tools/` — `phase3_wire_check.py` (control ids,
+  gestures, heartbeat model), `phase4_wire_check.py` (the mapping commands, slot switching,
+  remote-mode LED, factory reset) and `phase6_acceptance.py` (`GET_VERSION` cross-checked against the
+  heartbeat and CDC, `GET_INFO`, and both `ENTER_BOOTLOADER` magics). PP2's `tools/usb-coms` gives a
+  raw frame dump. `phase6_acceptance.py` imports its transport from `phase4_wire_check.py` rather than
+  duplicating it, so `Session`, `ModeProbe`, `expect_error` and the daemon warning are shared — keep
+  that file import-safe (everything behind `if __name__ == "__main__"`).
 
   ```bash
   DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid python tools/phase3_wire_check.py
   DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/phase4_wire_check.py
+  DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/phase6_acceptance.py
   ```
 
 - **Any of them must be launched from Terminal** — macOS only opens a vendor HID interface for a

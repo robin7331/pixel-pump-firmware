@@ -13,8 +13,9 @@ modernize the Pixel Pump 1 firmware so it works with Board Factory, then freeze 
   covered by `.gitignore`'s `/micropython`, which is why the build commands in `CLAUDE.md` are written
   the way they are. ~450 MB including build dirs. Do not re-clone; the disk runs close to full
   (12 GiB free, 98 %).
-- **Status:** Phase 0 landed in `c7614cd`, Phase 1 in `ebeea4c`. Phase 2 is next. All four open
-  decisions were resolved 2026-07-28 — see *Decisions* at the bottom.
+- **Status:** Phase 0 landed in `c7614cd`, Phase 1 in `ebeea4c`, Phase 2 in this branch and verified on
+  a physical pump 2026-07-28 — see *Deviations* for what changed against this plan. Phase 3 is next.
+  All four open decisions were resolved 2026-07-28 — see *Decisions* at the bottom.
 
 Phases are sequenced so each one ends at something testable on real hardware, and so the riskiest
 unknowns get answered first. There is no test framework here — every gate is a manual check on a
@@ -96,6 +97,40 @@ New `src/pixel_pump/usb/`: `protocol.py`, `vendor_hid.py`, `usb_manager.py`, `ke
 
 Likely free win: issue #29 (freeze on aux pedal with no PC connected) looks like the legacy
 `usb_hid.report()` blocking — worth confirming and closing here.
+
+### Deviations, as implemented *(2026-07-28)*
+
+Four departures from the text above. The first two are owed to PP2 on back-port.
+
+1. **`MODEL_ID` lives in `usb_manager.py`, not `protocol.py`.** This plan asked for `MODEL_ID = 1` in
+   `protocol.py`, but the cross-repo note requires that file to stay byte-identical with PP2, where the
+   value is `2`. Resolved by putting the shared vocabulary (`class ModelId`: 0/1/2) in `protocol.py`
+   and the per-device selection in `usb_manager.py`; the encoders take `model_id` as an argument,
+   defaulting to `UNKNOWN`, which reproduces the legacy heartbeat shape exactly (model byte `0`, no
+   `HAS_MODEL`).
+2. **Bug fix in `vendor_hid.tick()`, inherited from PP2.** The open-edge branch unconditionally cleared
+   `_last_host_rx_ms`, so a host frame arriving between the interface opening and the next `tick()` was
+   discarded and the device stayed inactive until the host's *next* heartbeat (~400 ms with the
+   daemon). A daemon that opens and immediately writes hits this every connect. The close edge already
+   clears that state, so the reset was redundant as well as lossy. **PP2 has the same bug.**
+3. **The mapping commands are wired, but there is no table yet.** `_handle_command` implements all five
+   v2 commands including the `0xFF` bulk dump, its terminator, both magics and the `BAD_CONTROL` /
+   `BAD_GESTURE` / `BAD_ACTION` / `STORAGE_ERROR` paths — but delegates storage to an optional
+   `mapping` object whose contract is the `USBManager` docstring. With no table wired up (this phase),
+   the four mapping commands answer `ERROR UNKNOWN_COMMAND`, which is what the spec's compatibility
+   matrix already describes and what a v2 host is prepared for. Phase 4 passes in `mapping.py` and
+   changes nothing here. Note the frozen `ErrorCode` enum has no `BAD_SLOT`, so an out-of-range slot —
+   it shares a byte with the gesture — reports as `BAD_GESTURE`.
+4. **Aux-pedal keys stayed in the `pixel_pump.py` callback** rather than becoming a
+   `_emit_keyboard_fallback` inside `USBManager`. Two reasons: PP2's fallback only fires when *no*
+   vendor host is active, whereas PP1's spec defaults put `SEND_KEY` on `FPEDAL_AUX` in **both** slots,
+   so plugging in the daemon must not stop the pedal from typing; and it keeps `USBManager` from
+   depending on `SettingsManager`. `publish_event` is therefore pure publish-all with no fallback
+   branch. Phase 4's dispatcher takes this over from the callback.
+
+Also worth knowing for Phase 3: buttons publish PRESS / RELEASE / HOLD / LONG_HOLD only, since
+`Button` has no tap detection yet — there are no button `TAP` frames until Phase 3, and GPIO6 still
+rides on the trigger button, so pedal presses publish as `TRIGGER_BTN` rather than `FPEDAL`.
 
 ---
 

@@ -14,19 +14,24 @@ Two UF2s come out of every build:
 - `firmware-blank.uf2` — MicroPython plus the USB stack, without `src/`. Flash this for development,
   then push `src/` over USB.
 
-> ⚠️ **Branch `firmware-v2` is mid-migration (issue #30, `docs/plans/`).** The `usb_hid` patch is gone
-> from the build, but `src/pixel_pump/keyboard.py` still does `import usb_hid` at module scope and
-> `pixel_pump.py` imports it. **`firmware.uf2` therefore boots straight into an ImportError** until
-> the Phase 2 USB port lands. Only `firmware-blank.uf2` is usable right now.
+> ⚠️ **Branch `firmware-v2` is mid-migration (issue #30, `docs/plans/`).** Phases 0, 1 and 2 have
+> landed, so both UF2s boot again. Phase 3 (gestures + the trigger/pedal split) is next, and all open
+> decisions are resolved. Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching
+> USB code.
 >
-> Phases 0 and 1 have landed; Phase 2 (the USB stack port) is next, and all open decisions are
-> resolved. Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
+> Phase 2 was verified on a physical pump on 2026-07-28.
 
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.25, async). Different
 > architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept
 > in sync rather than reinvented: `docs/usb-communication.md` (the USB protocol spec — canonical copy
-> lives in PP2, never edit this one independently) and `src/pixel_pump/usb/`, which Phase 2 ports from
-> PP2's equivalent.
+> lives in PP2, never edit this one independently) and `src/pixel_pump/usb/`, ported from PP2's
+> equivalent in Phase 2.
+>
+> `src/pixel_pump/usb/protocol.py` is the exception to the exception: **protocol v2 was authored
+> here**, and is to be back-ported to PP2 verbatim (`pixel-pump-two-firmware#4`), after which PP2 owns
+> it. Keep the two copies byte-identical — that is why the model id lives in `usb_manager.py` and not
+> in `protocol.py`. `vendor_hid.py` also carries a host-activity bug fix that PP2 still needs; see the
+> plan doc's *Deviations*.
 
 ## Build & Development Commands
 
@@ -64,7 +69,7 @@ hard-errors on `MICROPY_BOARD_VARIANT`.
 640 KiB firmware / 1408 KiB littlefs, but `memmap_mp_rp2040.ld` is handed the *whole* 2 MB — an
 oversized image links silently and then overwrites the filesystem, `settings.json` included, on first
 boot. The boundary cannot move without wiping every unit in the field, so this check is the only
-guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 375,416 B full, ~57 % of ceiling.
+guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 386,872 B full, ~59 % of ceiling.
 
 | Workflow | Job | Trigger | Release |
 |----------|-----|---------|---------|
@@ -106,9 +111,13 @@ bottom. Importing it *is* starting the firmware.
 ```
 lift/drop/low/high/reverse/trigger .tick() → secondary_pedal.tick()
   → no/nc/three_way valve.tick() → motor.tick()
-  → pixel_pump.tick(ticks_ms) → communication_manager.tick()
+  → pixel_pump.tick(ticks_ms) → communication_manager.tick() → usb_manager.tick()
   → renderer.flush_frame_buffer()  (throttled to every 33 ms)
 ```
+
+`usb_manager.tick()` drains the event queue (max 4 frames), emits the 500 ms device heartbeat, flushes
+queued ACK/ERROR/MAPPING responses and releases any pending keyboard tap. Every send is non-blocking
+(`timeout_ms=0`), so a host that stops draining its endpoints cannot stall the render loop.
 
 No asyncio anywhere. Every subsystem is cooperative and must return from `tick()` quickly.
 
@@ -163,7 +172,10 @@ Conventions worth preserving:
 | `controls/io_event_source.py` | Polled GPIO → event enum |
 | `motor.py` | PWM pump control (10 kHz), 60 s timeout |
 | `valve.py` | Solenoid with optional delayed switching |
-| `keyboard.py` | USB HID keyboard reports via the patched-in `usb_hid` module |
+| `usb/protocol.py` | Frame encode/decode + the whole v2 wire vocabulary. Keep byte-identical with PP2 |
+| `usb/vendor_hid.py` | Vendor HID interface (usage page `0xFF00`), TX seq, host-activity tracking |
+| `usb/usb_manager.py` | Owns both HID interfaces, event queue, heartbeat, host command dispatch |
+| `usb/keyboard.py` | `KeyboardInterface` wrapper; translates stored HID usages to negative modifiers |
 | `communication_manager.py` | Serial command protocol over USB stdin (non-blocking `select.poll`) |
 | `settings_manager.py` | `settings.json` on device flash, with forward/backward key migration |
 | `boot_sequence.py` | Rainbow LED sweep + valve click sequence at startup |
@@ -213,6 +225,32 @@ settings:set_secondary_pedal_long_key[_modifier]:<hex>
 
 `settings:persist` re-joins arguments on `:` so JSON payloads survive the split.
 
+This protocol is **not** superseded by vendor HID — it stays the configuration path for the four
+`secondary_pedal_*` keys, which the wire protocol deliberately cannot carry (`SEND_KEY` has no
+modifier byte). Both paths are live at once.
+
+## Vendor HID (protocol v2)
+
+`docs/usb-communication.md` is the spec and the source of truth for anything on the wire. The firmware
+side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump.py`, with
+`builtin_driver=True` so the CDC interface survives for `CommunicationManager`.
+
+- Composite device: HID keyboard + `Pixel Pump Vendor HID` (usage page `0xFF00`), 8-byte reports.
+- Device heartbeat every 500 ms carrying model id `1` and the firmware semver. The host counts as
+  *active* only while it writes to the vendor OUT path (1200 ms timeout) — opening the interface is
+  not enough.
+- **Publish-all rule:** while the host is active, *every* control publishes EVENT frames, whatever it
+  also does locally. The wiring lives in `pixel_pump.py`'s `on_button_event` / `on_event`, keyed on
+  `Button.title` via `_BUTTON_CONTROL_IDS` — rename a button and it silently stops publishing.
+- Buttons currently publish PRESS / RELEASE / HOLD / LONG_HOLD only. `Button` has no tap detection,
+  so **no `TAP` frames for buttons** until Phase 3; the aux pedal (`IOEventSource`) does send `TAP`.
+- GPIO6 is still OR'd into the trigger button, so foot-pedal presses publish as `TRIGGER_BTN`, not
+  `FPEDAL`. Phase 3 splits them.
+- The four mapping commands answer `ERROR UNKNOWN_COMMAND` until Phase 4 supplies a table —
+  `USBManager(mapping=...)` is the seam, and its docstring is the contract that `mapping.py` must meet.
+- `ENTER_BOOTLOADER` requires magic `0xB007`, `RESET_MAPPINGS` requires `0xDEFA`. A wrong magic is
+  `ERROR BAD_MAGIC` and must never reboot the pump mid-assembly.
+
 ## Notes
 
 - This is MicroPython — use `machine`, `rp2`, `utime`, `ujson`, not CPython equivalents. The only
@@ -230,7 +268,16 @@ settings:set_secondary_pedal_long_key[_modifier]:<hex>
 - `usb_hid` is **gone**. It only ever existed via the patch in `drivers/rp2_hid/`, which the build
   stopped applying in Phase 0; the directory itself was deleted in Phase 1. USB is now runtime-
   configured through micropython-lib's `usb.device` (frozen into both images), so HID work goes
-  through `usb.device.hid` / `usb.device.keyboard`, not `import usb_hid`.
+  through `usb.device.hid` / `usb.device.keyboard`, not `import usb_hid`. The old
+  `src/pixel_pump/keyboard.py` went with it in Phase 2 — the replacement is `usb/keyboard.py`.
+- **Modifiers are encoded differently on each side of `usb/keyboard.py`.** `settings.json` stores raw
+  HID usages (`0xE0`–`0xE7`, `0x00` = none), while micropython-lib's `send_keys` wants modifiers as
+  *negative* values (`r[0] |= -k`), i.e. `0xE0 + n → -(1 << n)`. The wrapper translates; anything
+  outside that range is passed through as an ordinary keycode, which is what the legacy code did.
+- Keyboard taps are **press now, release from `tick()`** (50 ms later) rather than press-and-release
+  back to back, and every send is guarded by `is_open()`. Legacy `usb_hid.report()` blocked on a
+  closed interface, which is the likely cause of issue #29 (aux pedal freezing the pump with no host
+  attached) — worth confirming on hardware.
 - Motor duty is stored 0–255 (`percentage * 2.55`) and then **squared** into 16-bit in `Motor.tick()`
   (`duty_u16(d * d)`), giving a quadratic response curve. Changing one side without the other will
   badly misscale power.

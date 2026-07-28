@@ -3,6 +3,7 @@ from machine import Pin, PWM, mem32, Timer
 import utime
 
 from .controls.button import Button
+from .controls.button_event import ButtonEvent
 from .controls.io_event_source import IOEventSource
 from .controls.io_event import IOEvent
 from .pixel_pump_state_machine import PixelPumpStateMachine
@@ -10,8 +11,9 @@ from .valve import Valve
 from .boot_sequence import run_boot_sequence
 from .motor import Motor
 from .communication_manager import CommunicationManager
-from .keyboard import Keyboard
 from .ui_renderer import UIRenderer
+from .usb.protocol import ControlId, EventKind
+from .usb.usb_manager import USBManager
 
 # Register Base Addresses
 
@@ -193,6 +195,12 @@ def SetPadQSPI(pin, d, s):
 for pin in range(6):
     SetPadQSPI(pin, 0, 0) # Drive = 0 (2mA), Slew = 0 (slow)
 
+# USB is initialized once, here, so the host has finished enumerating the
+# composite keyboard + vendor HID device by the time the boot sequence ends.
+# builtin_driver keeps the CDC interface, which CommunicationManager reads the
+# legacy stdin protocol from.
+usb_manager = USBManager(debug=False)
+
 def liftBtnTouchUp(btn):
     global pixel_pump
     pixel_pump.state.to_lift()
@@ -223,19 +231,69 @@ def trigger_buttonTouchUp(btn):
     pixel_pump.state.trigger_off()
 
 
+# Controls are identified on the wire by Button.title. Phase 3 splits GPIO6
+# (the foot pedal) out of the trigger button; until then the pedal is OR'd into
+# it and both publish as TRIGGER_BTN.
+_BUTTON_CONTROL_IDS = {
+    'Lift': ControlId.LIFT,
+    'Drop': ControlId.DROP,
+    'Low': ControlId.LOW,
+    'High': ControlId.HIGH,
+    'Reverse': ControlId.REVERSE,
+    'Trigger': ControlId.TRIGGER_BTN,
+}
+
+
+def _button_event_to_usb_event_kind(event):
+    # Button has no tap detection yet -- that arrives with the gesture work in
+    # Phase 3, together with EventKind.TAP for these controls.
+    if event == ButtonEvent.TOUCH_DOWN:
+        return EventKind.PRESS
+    if event == ButtonEvent.TOUCH_UP:
+        return EventKind.RELEASE
+    if event == ButtonEvent.TOUCH:
+        return EventKind.HOLD
+    if event == ButtonEvent.LONG_PRESS:
+        return EventKind.LONG_HOLD
+    return None
+
+
+def _io_event_to_usb_event_kind(event):
+    if event == IOEvent.ACTIVATE:
+        return EventKind.PRESS
+    if event == IOEvent.DEACTIVATE:
+        return EventKind.RELEASE
+    if event == IOEvent.TAPPED:
+        return EventKind.TAP
+    if event == IOEvent.HOLD:
+        return EventKind.HOLD
+    if event == IOEvent.LONG_HOLD:
+        return EventKind.LONG_HOLD
+    return None
+
+
 def on_button_event(btn, event):
     global pixel_pump
     pixel_pump.state.on_button_event(btn, event)
 
+    # Publish-all: every control is reported to an active host, whatever it
+    # does locally.
+    control_id = _BUTTON_CONTROL_IDS.get(btn.title)
+    event_kind = _button_event_to_usb_event_kind(event)
+    if control_id is not None and event_kind is not None:
+        usb_manager.publish_event(control_id, event_kind)
+
 def on_event(source, event):
     global pixel_pump
     # https://deskthority.net/wiki/Scancode for keyboard codes
-    if event is IOEvent.TAPPED:
-        k.press(pixel_pump.settings_manager.get_secondary_pedal_key_modifier(), pixel_pump.settings_manager.get_secondary_pedal_key())
-        k.release(pixel_pump.settings_manager.get_secondary_pedal_key_modifier(), pixel_pump.settings_manager.get_secondary_pedal_key())
-    if event is IOEvent.LONG_HOLD:
-        k.press(pixel_pump.settings_manager.get_secondary_pedal_long_key_modifier(), pixel_pump.settings_manager.get_secondary_pedal_long_key())
-        k.release(pixel_pump.settings_manager.get_secondary_pedal_long_key_modifier(), pixel_pump.settings_manager.get_secondary_pedal_long_key())
+    if event == IOEvent.TAPPED:
+        usb_manager.keyboard.tap(pixel_pump.settings_manager.get_secondary_pedal_key_modifier(), pixel_pump.settings_manager.get_secondary_pedal_key())
+    if event == IOEvent.LONG_HOLD:
+        usb_manager.keyboard.tap(pixel_pump.settings_manager.get_secondary_pedal_long_key_modifier(), pixel_pump.settings_manager.get_secondary_pedal_long_key())
+
+    event_kind = _io_event_to_usb_event_kind(event)
+    if event_kind is not None:
+        usb_manager.publish_event(ControlId.FPEDAL_AUX, event_kind)
 
 def renderBtn(btn):
     global renderer
@@ -324,8 +382,6 @@ run_boot_sequence(renderer, [no_valve, nc_valve, three_way_valve])
 
 uiTimer.deinit()
 
-k = Keyboard()
-
 rendered_at = 0
 
 while True:
@@ -347,6 +403,8 @@ while True:
     pixel_pump.tick(utime.ticks_ms())
 
     communication_manager.tick()
+
+    usb_manager.tick()
 
     # Render the UI at 30 FPS.
     if utime.ticks_ms() - rendered_at > 33:

@@ -18,13 +18,11 @@ Two UF2s come out of every build:
 > both UF2s boot again. Phase 5 (code health & docs) is next, and all open decisions are resolved.
 > Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
 >
-> Phases 2 and 3 are verified on a physical pump (2026-07-28), wire checks included.
->
-> **Phase 4's gate is only partly closed.** The dev pump runs it, and boot, the `settings.json`
-> upgrade and local dispatch are confirmed. What is *not* exercised on hardware is most of what the
-> phase is for: the five mapping commands, slot switching, remote-mode LEDs, the factory reset gesture
-> and the aux pedal's `SEND_KEY` sentinel. The logic behind those passed a CPython harness only — see
-> the plan doc's Phase 4 gate for the checklist.
+> Phases 2, 3 and 4 are all verified on a physical pump (2026-07-28), wire checks included —
+> `tools/phase3_wire_check.py` and `tools/phase4_wire_check.py` both pass end to end. Two narrow gaps
+> remain, neither blocking: the aux pedal's keystroke is confirmed only as far as the mapping table
+> reporting it, and `COMMIT_MAPPINGS` persistence has not been proven independently of the reset that
+> follows it. See the plan doc's Phase 4 gate.
 
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.25, async). Different
 > architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept
@@ -288,6 +286,12 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
 - `phase4_wire_check.py` reads `mode` back over CDC to judge whether a `FORWARD` button still acted
   locally. That question cannot be answered on the vendor interface — publish-all emits the EVENT
   frame either way.
+- **A blocking prompt is a disconnection.** The device drops to STANDALONE 1200 ms after the last host
+  write, so any `input()` in a checker times the host out mid-question, and the answer then describes
+  a standalone pump. This cost a full round of false failures that read convincingly like mapping-engine
+  bugs. `phase4_wire_check.py` beats the heartbeat on a background thread and waits for EVENT frames
+  instead of Enter; do the same in anything new. A press with no EVENT frame means the host was
+  inactive — report that as inconclusive, never as a failed mapping.
 
 ## Mapping engine (`mapping.py`)
 

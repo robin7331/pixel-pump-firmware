@@ -15,11 +15,10 @@ modernize the Pixel Pump 1 firmware so it works with Board Factory, then freeze 
   (12 GiB free, 98 %).
 - **Status:** Phase 0 landed in `c7614cd`, Phase 1 in `ebeea4c`, Phase 2 in this branch and verified on
   a physical pump 2026-07-28 — see *Deviations* for what changed against this plan. Phase 3 landed the
-  same day and its gate is **closed**, wire checks included. Phase 4 landed the same day and is on the
-  dev pump; its gate is **partly closed** — boot, settings migration and local dispatch confirmed, but
-  none of the mapping commands, slot switching, remote LEDs or the factory reset have been exercised on
-  hardware. Phase 5 is next. All four open decisions were resolved 2026-07-28 — see *Decisions* at the
-  bottom.
+  same day and its gate is **closed**, wire checks included. Phase 4 landed the same day, is on the dev
+  pump, and its gate is **closed too** — `tools/phase4_wire_check.py` passes end to end, bar two narrow
+  gaps noted under that phase. Phase 5 is next. All four open decisions were resolved 2026-07-28 — see
+  *Decisions* at the bottom.
 
 Phases are sequenced so each one ends at something testable on real hardware, and so the riskiest
 unknowns get answered first. There is no test framework here — every gate is a manual check on a
@@ -230,7 +229,8 @@ wire stays free of modifiers.
 reading the table sees `0x00` and cannot tell the user what the pedal actually sends without speaking
 the legacy stdin protocol, which it does not.
 
-**Gate: partly closed 2026-07-28.** The logic was checked against a CPython harness (not committed)
+**Gate closed 2026-07-28**, bar two narrow gaps listed at the end. The logic was checked against a
+CPython harness (not committed)
 that stubs `machine` / `utime` / `usb.device` and exercises the table, the dispatcher and
 `USBManager`'s five mapping commands — 51 assertions, all passing. Then flashed to the dev pump, where
 the following are confirmed:
@@ -255,17 +255,23 @@ Then `tools/phase4_wire_check.py` was run against it, closing most of the rest:
       `RESET` restores the defaults
 - [x] the factory reset gesture — LIFT + DROP at power-on wiped a committed override
 
-Still open:
+- [x] **slot switching and the remote-mode LED** — CONNECTED applies while the host heartbeats, a
+      `FORWARD` button does nothing locally, and the LED and the fallback both revert the moment the
+      heartbeat lapses
 
-- [ ] **slot switching and the remote-mode LED.** The first run reported these as failures, but the
-      result was *invalid*: every prompt in check F blocked, so no host heartbeat went out while the
-      operator read the question or reached for the button, and the device had dropped to STANDALONE
-      1200 ms in. All three symptoms — no purple LED, `FORWARD` ignored, LED never cleared — are
-      exactly what a STANDALONE pump looks like. Harness bug, not firmware. Fixed by beating the
-      heartbeat on a background thread and detecting presses from EVENT frames rather than an Enter
-      key; the press step now also *asserts* an EVENT frame arrived, since publish-all only emits
-      while the host is active, so "mapping respected" can no longer be confused with "connection
-      lapsed". **Needs a re-run.**
+That last one took two runs and is worth recording, because the first result was *invalid rather than
+negative* and read exactly like a firmware bug. Check F reported no purple LED, `FORWARD` ignored, and
+the LED never clearing. All three are what a **STANDALONE** pump looks like — and that is what was
+being measured: every prompt blocked on `input()`, no host heartbeat went out while the operator read
+the question and reached for the button, and the device times out after 1200 ms. The harness starved
+the connection it existed to measure. Fixed by beating the heartbeat on a background thread and
+detecting presses from EVENT frames instead of an Enter key, which also *proves* the host was active at
+press time — publish-all only emits while it is, so a missing frame is now reported as inconclusive
+rather than as a failed mapping. **Lesson for any future interactive check on this device: a blocking
+prompt is a disconnection.**
+
+Two narrow gaps remain, neither blocking:
+
 - [ ] the aux pedal actually *typing* the configured key (check C proves the read path reports it,
       not that the keystroke lands)
 - [ ] `COMMIT_MAPPINGS` persistence proven independently — check G's override was committed and then
@@ -350,9 +356,11 @@ From the issue's acceptance criteria:
       100/200 ms sequencing, pedal, keyboard emulation)
 - [ ] Daemon connects, reports model 1 + firmware version, receives button events
 - [ ] `ENTER_BOOTLOADER` (magic `0xB007`) lands the device in BOOTSEL
-- [ ] Mapping read/write/commit/reset round-trips; heartbeat timeout restores STANDALONE instantly
-- [ ] Legacy stdin protocol still answers (`version:info`, `settings:dump`)
-- [ ] Factory reset gesture works
+- [x] Mapping read/write/commit/reset round-trips; heartbeat timeout restores STANDALONE instantly —
+      `tools/phase4_wire_check.py`, 2026-07-28
+- [x] Legacy stdin protocol still answers (`version:info`, `settings:dump`) — both confirmed on the
+      Phase 4 build 2026-07-28
+- [x] Factory reset gesture works — `tools/phase4_wire_check.py` check G, 2026-07-28
 - [x] **Upgrade a unit carrying a real `settings.json` and confirm the file survives** — not listed
       explicitly in the issue, but it is the entire reason the flash offset is frozen. Confirmed
       2026-07-28 on the dev pump upgrading Phase 2/3 → Phase 4; see Phase 4's gate

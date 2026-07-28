@@ -28,7 +28,7 @@ Two UF2s come out of every build:
 > reporting it, and `COMMIT_MAPPINGS` persistence has not been proven independently of the reset that
 > follows it. See the plan doc's Phase 4 gate.
 
-> Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.25, async). Different
+> Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.28.0, async). Different
 > architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept
 > in sync rather than reinvented: `docs/usb-communication.md` (the USB protocol spec — canonical copy
 > lives in PP2, never edit this one independently) and `src/pixel_pump/usb/`, ported from PP2's

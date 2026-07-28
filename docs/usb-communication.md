@@ -13,9 +13,9 @@ is closed, and all future control features are host-side intents.
 
 | Codebase | Status | Tracking |
 |---|---|---|
-| Pixel Pump 2 firmware (this repo) | v1 wire protocol shipping; v2 not yet implemented | robin7331/pixel-pump-two-firmware#4 |
-| Pixel Pump 1 firmware | Legacy (no vendor HID at all — stdin line protocol only) | robin7331/pixel-pump-firmware#30 |
-| Board Factory daemon (`board-factory/rust/pixel-pump-daemon`) | v1 implemented | robin7331/board-factory#4 |
+| Pixel Pump 2 firmware (this repo) | v2 implemented and hardware-verified (2026-07-28); unreleased — the PID split must not ship before hosts discover on both PIDs | robin7331/pixel-pump-two-firmware#4 |
+| Pixel Pump 1 firmware | v2 implemented on `firmware-v2` (issue #30 complete); shipping units remain legacy (no vendor HID at all — stdin line protocol only) | robin7331/pixel-pump-firmware#30 |
+| Board Factory daemon (`board-factory/rust/pixel-pump-daemon`) | v1 implemented; v2 + multi-PID discovery not started | robin7331/board-factory#4 |
 
 Sections that only exist in v2 are marked **[v2]**. Everything else shipped
 with v1 and is unchanged.
@@ -38,6 +38,10 @@ distinguishable at enumeration. Note the PID is a *firmware* property, not a
 hardware one: PP2 field units still on legacy firmware keep `0x1061` forever,
 so `0x1061` remains ambiguous (legacy PP2 or PP1). Hosts must match **both
 PIDs** and treat the in-protocol model ID as the authoritative discriminator.
+The two are not redundant: the PID identifies the product to the OS, the
+model ID tells the host which dialect and mapping table apply. A host seeing
+them disagree (e.g. `0x1062` reporting model `1`) should treat that as an
+error, not pick a winner.
 Sequencing constraint: the PP2 PID flip must not ship before hosts discover
 on both PIDs (robin7331/board-factory#4), or updated pumps disappear from a
 single-PID host.
@@ -493,12 +497,13 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
 
 - Production: `board-factory/rust/pixel-pump-daemon/` (`protocol.rs`,
   `usb_hid.rs`)
-- Diagnostics: `tools/usb-coms/main.py` in this repo (device discovery,
-  heartbeats, frame decoding, `--command get-version` / `enter-bootloader`)
+- Diagnostics: `tools/usb-coms/main.py` in this repo (device discovery on
+  both PIDs, heartbeats, frame decoding, `--command get-version` /
+  `get-info` / `enter-bootloader`)
 
 ## Changelog
 
-- **v2** (spec 2026-07-27, not yet implemented — see status table): protocol
+- **v2** (spec 2026-07-27; implementation state in the status table): protocol
   version byte `2`; model IDs + `HAS_MODEL` flag + `GET_INFO`; ControlIds
   7–15 (pedals both devices, PP1 buttons, trigger/pedal split); two-layer
   mapping model with STANDALONE/CONNECTED slots, `MAPPING` message type,

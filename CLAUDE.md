@@ -206,6 +206,11 @@ settings:set_secondary_pedal_long_key[_modifier]:<hex>
   CPython file in the repo is `tools/generateVersionFile.py`, which runs on the CI host.
 - No test framework, no linter, no formatter. Testing is manual, on hardware.
 - USB identity: VID `0x2E8A`, PID `0x1061`, "Robins Tools" / "Pixel Pump" (`boards/PIXEL_PUMP/mpconfigboard.h`).
+  `0x2E8A` is Raspberry Pi's vendor ID; `0x1061` is the product ID they assigned for the Pixel Pump 1
+  and **must not change** — hosts already in the field discover the pump by it. PP2 moves to `0x1062`
+  so the two are distinguishable at enumeration; until then both share `0x1061` and a host cannot tell
+  them apart before opening the vendor interface. `0x1062` is provisional until Raspberry Pi confirms
+  the assignment.
 - The CPU is deliberately underclocked to 96 MHz, and QSPI pads are set to 2 mA / slow slew in
   `pixel_pump.py` — both are EMI/noise measures. The large register-address constant block at the top
   of that file is mostly unused; only `SetPadQSPI` reads from it.

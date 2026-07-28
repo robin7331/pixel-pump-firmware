@@ -180,6 +180,26 @@ PP2's `protocol.py` is still `PROTOCOL_VERSION = 1` with no `MAPPING` / `GET_INF
 v2 here first and back-port the file to PP2 under `pixel-pump-two-firmware#4`, keeping the two copies
 byte-identical. Needs confirmation that PP1 is the reference implementation.
 
+### USB product ID allocation *(decided 2026-07-28)*
+
+`0x2E8A` is Raspberry Pi's vendor ID. They assigned `0x1061` for the Pixel Pump 1; PP2 takes
+**`0x1062`** so the two models are distinguishable at enumeration, before any interface is opened.
+
+This was confirmed as a real problem during Phase 0 hardware testing: both firmwares currently ship
+`0x2E8A:0x1061`, so PP2's `usb-coms` binds whichever pump is plugged in and cannot tell which model
+it found. Only one pump may be connected at a time until PP2 moves.
+
+- **PP1 does not change.** `0x1061` is what hosts in the field already discover the pump by.
+- PP2's change is 7 sites in `../pixel-pump-two-firmware`, and firmware + tooling must move together
+  or the tool stops finding already-flashed prototypes: `boards/PIXEL_PUMP/mpconfigboard.h`,
+  `tools/usb-coms/main.py` (`--pid` default), `tools/usb-coms/README.md` ×2, `docs/usb-communication.md`
+  ×2, `CLAUDE.md`.
+- `0x1062` is **provisional** until Raspberry Pi confirms the assignment — picking one unilaterally
+  from their VID space risks colliding with another licensee.
+- Distinct PIDs do not make `MODEL_ID` redundant: the PID identifies the product to the OS, while
+  `MODEL_ID` in the heartbeat tells the daemon which protocol dialect and mapping table apply. Keep
+  both, and let the daemon treat a `MODEL_ID` that disagrees with the PID as an error.
+
 ---
 
 ## Open decisions

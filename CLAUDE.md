@@ -261,11 +261,17 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
   `USBManager(mapping=...)` is the seam, and its docstring is the contract that `mapping.py` must meet.
 - `ENTER_BOOTLOADER` requires magic `0xB007`, `RESET_MAPPINGS` requires `0xDEFA`. A wrong magic is
   `ERROR BAD_MAGIC` and must never reboot the pump mid-assembly.
+- To watch the wire, `tools/phase3_wire_check.py` runs the outstanding Phase 3 checks interactively
+  (`DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid python tools/phase3_wire_check.py`); PP2's
+  `tools/usb-coms` gives a raw frame dump. **Either must be launched from Terminal** — macOS only
+  opens a vendor HID interface for a process holding Input Monitoring, and refuses everything else
+  with "exclusive access and device already open".
 
 ## Notes
 
 - This is MicroPython — use `machine`, `rp2`, `utime`, `ujson`, not CPython equivalents. The only
-  CPython file in the repo is `tools/generateVersionFile.py`, which runs on the CI host.
+  CPython files in the repo are the two under `tools/`: `generateVersionFile.py`, which runs on the
+  CI host, and `phase3_wire_check.py`, which runs on a developer's machine.
 - No test framework, no linter, no formatter. Testing is manual, on hardware.
 - USB identity: VID `0x2E8A`, PID `0x1061`, "Robins Tools" / "Pixel Pump" (`boards/PIXEL_PUMP/mpconfigboard.h`).
   `0x2E8A` is Raspberry Pi's vendor ID; `0x1061` is the product ID they assigned for the Pixel Pump 1

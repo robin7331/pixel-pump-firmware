@@ -160,10 +160,10 @@ checked is what the host sees, and it is the part this phase is really about:
 - [ ] buttons emit `TAP`, ahead of `RELEASE` in the same tick
 - [ ] the heartbeat still reports model 1 with `HAS_MODEL`
 
-Checking these needs the vendor HID interface, which macOS only hands to a process holding Input
-Monitoring — it must be launched from Terminal, not from an agent shell. PP2's `tools/usb-coms` will
-show the frames; note it cannot assert the *absence* of the wrong control id, which is the actual
-regression risk here.
+`tools/phase3_wire_check.py` walks all four interactively and asserts the absence of the wrong control
+id, which PP2's `tools/usb-coms` cannot — a raw dump shows what arrived, not what should not have.
+Either needs the vendor HID interface, which macOS only hands to a process holding Input Monitoring,
+so it must be launched from Terminal rather than an agent shell.
 
 ### Deviations, as implemented *(2026-07-28)*
 

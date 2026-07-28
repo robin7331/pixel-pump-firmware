@@ -6,3 +6,4 @@
 /phase0_smoke.py
 settings.json
 __pycache__
+.DS_Store

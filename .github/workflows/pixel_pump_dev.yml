@@ -13,22 +13,18 @@ jobs:
   dev-build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         fetch-depth: 0
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         repository: micropython/micropython
-        ref: '294baf52b346e400e2255c6c1e82af5b978b18f7' # v1.20 tag
+        ref: 'v1.28.0'
         path: "./micropython"
     - name: Update apt-get
       run: sudo apt-get update
     - name: Install packages
       run: sudo apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential cmake git python3 -y
-    - name: Apply HID fix
-      run: |
-        cd $GITHUB_WORKSPACE/micropython/
-        git apply -v --ignore-space-change --ignore-whitespace $GITHUB_WORKSPACE/drivers/rp2_hid/0001-shared-tinyusb-Add-USB-HID-support.patch
     - name: Generate Version File
       run: |
         python3 $GITHUB_WORKSPACE/tools/generateVersionFile.py --output $GITHUB_WORKSPACE/src/pixel_pump/version.py --repo $GITHUB_WORKSPACE
@@ -44,13 +40,18 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP BOARD_VARIANT=EMPTY
-        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware-blank.uf2
+        cp $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.uf2 $GITHUB_WORKSPACE/firmware-blank.uf2
     - name: Build Pixel Pump Firmware
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP clean
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP
-        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware.uf2
+        cp $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware.uf2
+    - name: Check firmware fits below the littlefs partition
+      run: |
+        $GITHUB_WORKSPACE/tools/checkFirmwareSize.sh \
+          $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.bin \
+          $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.bin
     - uses: marvinpinto/action-automatic-releases@latest
       name: Release
       with:

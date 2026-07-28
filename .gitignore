@@ -1,7 +1,8 @@
 /.vscode
 /pico-go.json
 /micropython
-/workflow
-.secrets
+/firmware.uf2
+/firmware-blank.uf2
+/phase0_smoke.py
 settings.json
 __pycache__

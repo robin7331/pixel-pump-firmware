@@ -2,7 +2,7 @@
 
 MicroPython firmware for the Pixel Pump — a vacuum pick-and-place tool for PCB assembly.
 
-It runs on an RP2040 (Raspberry Pi Pico) with MicroPython v1.20. The pump has six illuminated
+It runs on an RP2040 (Raspberry Pi Pico) with MicroPython v1.28. The pump has six illuminated
 buttons, three solenoid valves, a PWM-driven vacuum pump and two foot pedal inputs. The firmware is
 a small state machine: **Lift**, **Drop** and **Reverse** are the three operating modes, and
 long-pressing a button gets you into its settings.
@@ -144,27 +144,88 @@ Keycodes are HID scancodes — see the [scancode table](https://deskthority.net/
 
 ## Building
 
-There's no local Makefile. Builds run as GitHub Actions, which you can run on your own machine with
-[nektos/act](https://github.com/nektos/act). It uses Docker under the hood, so make sure that's
-running.
+There's no Makefile here. A build is the MicroPython rp2 port compiled against the board definition
+in `boards/PIXEL_PUMP/`, so you need a MicroPython checkout and an Arm bare-metal toolchain. It all
+runs natively — no Docker, no containers.
+
+### Prerequisites
 
 ```bash
-brew install act
-
-act -j local-dev-build -b ./build
+brew install cmake
+brew install --cask gcc-arm-embedded   # Arm's official toolchain — includes newlib
 ```
 
-This takes a while — it compiles mpy-cross and the entire rp2 port from source. When it finishes
-you'll have `firmware.uf2` and `firmware-blank.uf2`.
+> Take the **cask**, not the `arm-none-eabi-gcc` formula. The formula ships a compiler with no
+> newlib, and the pico-sdk build dies on a missing `nosys.specs`.
 
-Each build applies a patch to MicroPython that adds a `usb_hid` module
-(`drivers/rp2_hid/0001-shared-tinyusb-Add-USB-HID-support.patch`), generates `src/pixel_pump/version.py`
-from git, and then builds twice — once empty, once with `src/` frozen in via
-`boards/PIXEL_PUMP/manifest.py`.
+### Getting MicroPython
+
+Clone it wherever you like — the examples below put it next to this repo. Match the version CI
+pins, or you're testing a different firmware than the one that ships:
+
+```bash
+git clone --depth 1 --branch v1.28.0 https://github.com/micropython/micropython.git
+cd micropython
+make -C mpy-cross                 # bytecode compiler, needed to freeze src/
+make -C ports/rp2 submodules      # pico-sdk, tinyusb, micropython-lib
+```
+
+### Building the two images
+
+`BOARD_DIR` has to be an absolute path, so point a variable at your checkout of this repo and stay
+in the `micropython/` directory:
+
+```bash
+export PP=/absolute/path/to/pixel-pump-firmware
+
+# Optional — stamps real git metadata into version.py. Skip it and you get "local" placeholders.
+python3 $PP/tools/generateVersionFile.py --output $PP/src/pixel_pump/version.py --repo $PP
+
+# firmware-blank.uf2 — MicroPython and the USB stack, without src/
+make -C ports/rp2 BOARD_DIR=$PP/boards/PIXEL_PUMP BOARD_VARIANT=EMPTY -j8
+
+# firmware.uf2 — the same, with src/ frozen in
+make -C ports/rp2 BOARD_DIR=$PP/boards/PIXEL_PUMP -j8
+```
+
+Each variant gets its own build directory:
+
+```
+ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.uf2   → this is firmware-blank.uf2
+ports/rp2/build-PIXEL_PUMP/firmware.uf2         → this is firmware.uf2
+```
+
+What ends up frozen is decided by the manifests in `boards/PIXEL_PUMP/`:
+
+| Manifest | Frozen content |
+|---|---|
+| `manifest_shared.py` | The port manifest, plus micropython-lib's `usb-device`, `usb-device-hid` and `usb-device-keyboard` |
+| `manifest_empty.py` | Shared only — this is the blank image, and why `import usb.device` works while you're mounting `src/` |
+| `manifest.py` | Shared plus `src/` — this is the shipping image |
+
+### Checking that it still fits
+
+Run this whenever you add frozen code:
+
+```bash
+$PP/tools/checkFirmwareSize.sh \
+  ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.bin \
+  ports/rp2/build-PIXEL_PUMP/firmware.bin
+```
+
+The pump's 2 MB of flash is split in two: 1408 KiB of littlefs at the top, where `settings.json`
+lives, leaving 640 KiB for firmware. **Nothing in the build enforces that split.** The linker is
+handed the whole 2 MB, so an image that outgrows 640 KiB links without a word of complaint and then
+overwrites the filesystem the first time it boots. The boundary can't be moved either — that would
+wipe the settings of every pump already in the field. This check is the only thing guarding it, and
+CI runs it as a hard failure.
+
+### CI
+
+The workflows do exactly the above on an Ubuntu runner:
 
 | Workflow | Trigger | Result |
 |---|---|---|
-| `pixel_pump_dev_local.yml` | push to `dev` | build only — this is the one to run with `act` |
 | `pixel_pump_dev.yml` | push / PR to `dev` | draft prerelease tagged `latest` |
 | `pixel_pump_main.yml` | `v*` tag | draft release |
 
@@ -184,9 +245,10 @@ src/pixel_pump/
   communication_manager.py      Serial command parser
   settings_manager.py           settings.json persistence
 
-boards/PIXEL_PUMP/              MicroPython board definition and freeze manifest
-drivers/rp2_hid/                USB HID patch for MicroPython
+boards/PIXEL_PUMP/              MicroPython board definition and freeze manifests
+drivers/rp2_hid/                Legacy USB HID patch — no longer applied by the build
 tools/generateVersionFile.py    Writes version.py from git metadata (runs in CI)
+tools/checkFirmwareSize.sh      Fails if an image would overrun the littlefs partition
 ```
 
 There's no test suite and no linter — testing is done by hand, on hardware.

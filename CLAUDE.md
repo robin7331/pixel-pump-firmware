@@ -5,14 +5,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 MicroPython firmware for the original Pixel Pump — a vacuum pick-and-place tool for PCB assembly.
-Runs on RP2040 (Raspberry Pi Pico) with MicroPython v1.20, pinned in CI to commit `294baf52`.
+Runs on RP2040 (Raspberry Pi Pico) with MicroPython **v1.28.0**, stock — no patches applied.
 
-The build patches MicroPython itself to add a `usb_hid` module (`drivers/rp2_hid/0001-...patch`, from
-jimmo upstream), then freezes the application code into a custom firmware image. Two UF2s come out of
-every build:
+The build freezes micropython-lib's USB stack and the application code into a custom firmware image.
+Two UF2s come out of every build:
 
 - `firmware.uf2` — MicroPython **with** `src/` frozen in. What ships on a pump.
-- `firmware-blank.uf2` — MicroPython only. Flash this for development, then push `src/` over USB.
+- `firmware-blank.uf2` — MicroPython plus the USB stack, without `src/`. Flash this for development,
+  then push `src/` over USB.
+
+> ⚠️ **Branch `firmware-v2` is mid-migration (issue #30, `docs/plans/`).** The `usb_hid` patch is gone
+> from the build, but `src/pixel_pump/keyboard.py` still does `import usb_hid` at module scope and
+> `pixel_pump.py` imports it. **`firmware.uf2` therefore boots straight into an ImportError** until
+> the Phase 2 USB port lands. Only `firmware-blank.uf2` is usable right now.
 
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.25, async). Different
 > architecture — don't copy patterns between them without checking.
@@ -21,29 +26,43 @@ every build:
 
 ### Building firmware
 
-There is no local Makefile. Builds run through GitHub Actions, which you can execute locally with
-[nektos/act](https://github.com/nektos/act) (needs Docker running):
+There is no local Makefile. Builds are the MicroPython rp2 port compiled against `boards/PIXEL_PUMP/`,
+natively — no Docker, no act. Needs `cmake` and Arm's toolchain (`brew install --cask gcc-arm-embedded`;
+the `arm-none-eabi-gcc` *formula* has no newlib and fails on a missing `nosys.specs`).
 
 ```bash
-brew install act
+git clone --depth 1 --branch v1.28.0 https://github.com/micropython/micropython.git
+cd micropython
+make -C mpy-cross                 # needed to freeze src/
+make -C ports/rp2 submodules      # pico-sdk, tinyusb, micropython-lib
 
-act -j local-dev-build -b ./build   # .github/workflows/pixel_pump_dev_local.yml
+export PP=/absolute/path/to/pixel-pump-firmware
+make -C ports/rp2 BOARD_DIR=$PP/boards/PIXEL_PUMP BOARD_VARIANT=EMPTY -j8   # firmware-blank.uf2
+make -C ports/rp2 BOARD_DIR=$PP/boards/PIXEL_PUMP -j8                       # firmware.uf2
+
+$PP/tools/checkFirmwareSize.sh \
+  ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.bin ports/rp2/build-PIXEL_PUMP/firmware.bin
 ```
 
-Expect this to take a while — it compiles mpy-cross and the whole rp2 port. All three workflows
-perform the same build: apply the HID patch → generate `version.py` → build `BOARD_VARIANT=EMPTY`
-(→ `firmware-blank.uf2`) → clean → build again with the manifest (→ `firmware.uf2`).
+Each variant has its own build directory — `build-PIXEL_PUMP-EMPTY/` and `build-PIXEL_PUMP/`. The
+manifests decide what is frozen: `manifest_shared.py` (port manifest + `usb-device`,
+`usb-device-hid`, `usb-device-keyboard`) is included by `manifest_empty.py` and by `manifest.py`,
+which adds `src/`. `mpconfigvariant_EMPTY.cmake` selects the empty one; it must exist or cmake
+hard-errors on `MICROPY_BOARD_VARIANT`.
+
+**Always run `tools/checkFirmwareSize.sh` after adding frozen code.** The 2 MB of flash is split
+640 KiB firmware / 1408 KiB littlefs, but `memmap_mp_rp2040.ld` is handed the *whole* 2 MB — an
+oversized image links silently and then overwrites the filesystem, `settings.json` included, on first
+boot. The boundary cannot move without wiping every unit in the field, so this check is the only
+guard. CI runs it as a hard failure. Current usage: 345,808 B blank / 375,072 B full, ~57 % of ceiling.
 
 | Workflow | Job | Trigger | Release |
 |----------|-----|---------|---------|
-| `pixel_pump_dev_local.yml` | `local-dev-build` | push to `dev` | none — for local `act` runs |
 | `pixel_pump_dev.yml` | `dev-build` | push/PR to `dev` | draft prerelease, tag `latest` |
 | `pixel_pump_main.yml` | `dev-build` | `v*` tags | draft release |
 
-Two caveats if you touch CI: `README.md` documents `act -j dev-build` / `act -j release-build`, but
-no `release-build` job exists and `dev-build` is defined in *two* workflows, so `-j dev-build` is
-ambiguous. The local workflow also checks out into a `pixel-pump-firmware/` subdirectory while every
-later step still references `$GITHUB_WORKSPACE/...` — verify it actually runs before relying on it.
+Both define a job named `dev-build`. The artifact paths matter: the blank build lands in
+`build-PIXEL_PUMP-EMPTY/`, not `build-PIXEL_PUMP/`.
 
 ### Remote development on MCU
 
@@ -190,9 +209,10 @@ settings:set_secondary_pedal_long_key[_modifier]:<hex>
 - The CPU is deliberately underclocked to 96 MHz, and QSPI pads are set to 2 mA / slow slew in
   `pixel_pump.py` — both are EMI/noise measures. The large register-address constant block at the top
   of that file is mostly unused; only `SetPadQSPI` reads from it.
-- `usb_hid` only exists because of the patch in `drivers/rp2_hid/`. It is not stock MicroPython, so a
-  plain upstream firmware will fail at `import usb_hid`. The `.py` files alongside the patch are
-  upstream reference drivers, not used by `src/`.
+- `usb_hid` is **gone**. It only ever existed via the patch in `drivers/rp2_hid/`, which the build no
+  longer applies; that directory is dead weight awaiting deletion in Phase 1. USB is now runtime-
+  configured through micropython-lib's `usb.device` (frozen into both images), so HID work goes
+  through `usb.device.hid` / `usb.device.keyboard`, not `import usb_hid`.
 - Motor duty is stored 0–255 (`percentage * 2.55`) and then **squared** into 16-bit in `Motor.tick()`
   (`duty_u16(d * d)`), giving a quadratic response curve. Changing one side without the other will
   badly misscale power.
@@ -214,7 +234,5 @@ Pre-existing, and useful to know before touching the surrounding code:
 - Timing uses plain `utime.ticks_ms()` subtraction rather than `utime.ticks_diff()`, so it breaks at
   the ~12.4-day wraparound. Consistent across the codebase; match the surrounding style unless you're
   deliberately fixing it.
-- `README.md` is stale in two places: the "Hacking around" section documents the deleted `tools/*.py`
-  scripts (point people at mpremote), and its `act` commands name a job that doesn't exist.
 - `pixel_pump.py` creates a stray `foot_aux = Pin(7, ...)` that nothing reads; `secondary_pedal` owns
   that pin.

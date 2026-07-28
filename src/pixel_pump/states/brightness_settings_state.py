@@ -25,19 +25,19 @@ class BrightnessSettingsState(State):
         self.device.set_power_mode(self.device.power_mode)
 
     def on_button_event(self, btn, event):
-        if btn is self.device.low_button and event is ButtonEvent.TOUCH_UP:
+        if btn is self.device.low_button and event == ButtonEvent.TOUCH_UP:
             self.current_brightness_modifier = self.current_brightness_modifier - 0.05
             if self.current_brightness_modifier < 0.35:
                 self.current_brightness_modifier = 0.35
             self.device.ui_renderer.brightness_modifier = self.current_brightness_modifier
 
-        if btn is self.device.high_button and event is ButtonEvent.TOUCH_UP:
+        if btn is self.device.high_button and event == ButtonEvent.TOUCH_UP:
             self.current_brightness_modifier = self.current_brightness_modifier + 0.05
             if self.current_brightness_modifier > 0.8:
                 self.current_brightness_modifier = 0.8
             self.device.ui_renderer.brightness_modifier = self.current_brightness_modifier
 
-        if btn is self.device.drop_button and event is ButtonEvent.LONG_PRESS:
+        if btn is self.device.drop_button and event == ButtonEvent.LONG_PRESS:
             from .bootloader_state import BootloaderState
             self.device.set_state(BootloaderState(self.device))
 

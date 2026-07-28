@@ -142,6 +142,36 @@ command parser directly.
 
 Keycodes are HID scancodes — see the [scancode table](https://deskthority.net/wiki/Scancode).
 
+## Talking to a host
+
+Besides the serial port, the pump enumerates as a composite USB device: a plain HID keyboard, plus a
+vendor HID interface on usage page `0xFF00` that a host application uses to drive the pump.
+[`docs/usb-communication.md`](docs/usb-communication.md) is the full spec; the short version:
+
+- The device sends a **heartbeat** every 500 ms carrying its model id and firmware version. A host
+  counts as connected only while it keeps writing back — the pump falls back to standalone behaviour
+  1200 ms after the host goes quiet.
+- While a host is connected, **every** control publishes its gestures (press, release, tap, hold,
+  long hold) as event frames, whatever else that control also does locally.
+- A host can read and rewrite the **mapping table**: which action each control and gesture triggers,
+  with a separate column for standalone and connected use. Writes land in RAM until committed to
+  flash. Out of the box both columns are classic Pixel Pump behaviour, so a pump with no host
+  attached acts exactly like it always did.
+
+If a host maps a button to `FORWARD` — meaning "just tell me, don't act" — that button glows purple
+while connected. Should you ever end up with a table that forwards everything and no host to undo it,
+**hold Lift + Drop while powering on** for three seconds: the LEDs flash white and the table is back
+to defaults.
+
+Two interactive checkers live in `tools/` for poking at this from a developer machine. Both need the
+vendor interface, which macOS only hands to a process holding Input Monitoring, so run them from
+Terminal rather than an IDE:
+
+```bash
+DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid python tools/phase3_wire_check.py
+DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/phase4_wire_check.py
+```
+
 ## Building
 
 There's no Makefile here. A build is the MicroPython rp2 port compiled against the board definition
@@ -241,14 +271,18 @@ src/pixel_pump/
   enums/                        Colors, brightness levels, power modes
   ui_renderer.py                WS2812 driver (PIO) and frame buffer
   motor.py, valve.py            Pump and solenoid control
-  keyboard.py                   USB HID keyboard output
+  usb/                          Vendor HID stack — protocol frames, event publishing, keyboard
+  mapping.py                    Which control and gesture does what, and the host-writable table
   communication_manager.py      Serial command parser
   settings_manager.py           settings.json persistence
+  boot_sequence.py              Startup LED sweep and valve clicks
+  version.py                    Git metadata — regenerated in CI, "local" placeholders in git
 
 boards/PIXEL_PUMP/              MicroPython board definition, pin names and freeze manifests
 docs/usb-communication.md       USB protocol spec (canonical copy lives in the Pixel Pump 2 repo)
 tools/generateVersionFile.py    Writes version.py from git metadata (runs in CI)
 tools/checkFirmwareSize.sh      Fails if an image would overrun the littlefs partition
+tools/phase*_wire_check.py      Interactive checks against a pump over USB (see below)
 ```
 
 There's no test suite and no linter — testing is done by hand, on hardware.

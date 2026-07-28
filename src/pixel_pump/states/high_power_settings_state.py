@@ -32,9 +32,9 @@ class HighPowerSettingsState(State):
         self.device.set_power_mode(self.old_power_mode)
 
     def on_button_event(self, btn, event):
-        if btn is self.device.low_button and event is ButtonEvent.TOUCH_DOWN:
+        if btn is self.device.low_button and event == ButtonEvent.TOUCH_DOWN:
             self.device.set_high_power_setting(self.device.high_power_setting - 5)
-        if btn is self.device.high_button and event is ButtonEvent.TOUCH_DOWN:
+        if btn is self.device.high_button and event == ButtonEvent.TOUCH_DOWN:
             self.device.set_high_power_setting(self.device.high_power_setting + 5)
 
     def to_reverse(self):

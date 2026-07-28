@@ -42,11 +42,11 @@ class PixelPumpStateMachine:
             motor)
 
         mode = self.settings_manager.get_mode()
-        if mode is 0:
+        if mode == 0:
             self.set_state(LiftState(self))
-        elif mode is 1:
+        elif mode == 1:
             self.set_state(DropState(self))
-        elif mode is 2:
+        elif mode == 2:
             self.set_state(ReverseState(self))
         else:
             self.set_state(LiftState(self))
@@ -69,7 +69,7 @@ class PixelPumpStateMachine:
     def set_power_mode(self, power_mode):
         self.power_mode = power_mode
         self.settings_manager.set_power_mode(power_mode)
-        if self.power_mode is PowerMode.HIGH:
+        if self.power_mode == PowerMode.HIGH:
             self.high_button.set_color(Colors.BLUE, Brightness.DEFAULT)
             self.low_button.clear_color()
         else:
@@ -95,11 +95,11 @@ class PixelPumpStateMachine:
         self.high_duty = int(percentage * 2.55)
 
     def target_motor_pwm(self):
-        if self.power_mode is PowerMode.LOW:
+        if self.power_mode == PowerMode.LOW:
             return self.low_duty
-        elif self.power_mode is PowerMode.HIGH:
+        elif self.power_mode == PowerMode.HIGH:
             return self.high_duty
-        elif self.power_mode is PowerMode.MAX:
+        elif self.power_mode == PowerMode.MAX:
             return 255
 
     def tick(self, tick_ms):

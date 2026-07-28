@@ -17,8 +17,9 @@ modernize the Pixel Pump 1 firmware so it works with Board Factory, then freeze 
   a physical pump 2026-07-28 — see *Deviations* for what changed against this plan. Phase 3 landed the
   same day and its gate is **closed**, wire checks included. Phase 4 landed the same day, is on the dev
   pump, and its gate is **closed too** — `tools/phase4_wire_check.py` passes end to end, bar two narrow
-  gaps noted under that phase. Phase 5 is next. All four open decisions were resolved 2026-07-28 — see
-  *Decisions* at the bottom.
+  gaps noted under that phase. Phase 5 landed the same day; it has no gate of its own and is verified
+  by Phase 6, which is next and is the last phase in this issue. All four open decisions were resolved
+  2026-07-28 — see *Decisions* at the bottom.
 
 Phases are sequenced so each one ends at something testable on real hardware, and so the riskiest
 unknowns get answered first. There is no test framework here — every gate is a manual check on a
@@ -329,7 +330,7 @@ instead overrides the four power intents to no-ops to keep its `PowerMode.MAX` f
 
 ---
 
-## Phase 5 — Code health & docs
+## Phase 5 — Code health & docs *(landed 2026-07-28)*
 
 - `is` → `==` sweep: `communication_manager.py`, `pixel_pump_state_machine.py`, `controls/button.py`,
   and the three settings states. (`states/state.py` lost its `is` comparisons in Phase 4, when the
@@ -346,6 +347,77 @@ instead overrides the four power intents to no-ops to keep its `PowerMode.MAX` f
 - Update `README.md` (stale `act` job names, deleted `tools/*.py` → mpremote) and `CLAUDE.md` (no HID
   patch, new manifest layout, USB stack, mapping engine).
 
+### As implemented *(2026-07-28)*
+
+All four items done. This phase has no hardware gate of its own — it is verified by Phase 6, which
+now has one item to re-check rather than inherit (see below).
+
+1. **The sweep kept `is` where it means identity.** Twenty comparisons moved to `==`: four command
+   strings in `parse()`, seven `PowerMode`/mode ints in `pixel_pump_state_machine.py`, two
+   `pulseDirection` ints in `Button.tick`, and the `ButtonEvent` halves of the seven `on_button_event`
+   guards in the three settings states. The `btn is self.device.low_button` halves stayed `is` — those
+   compare `Button` *instances*, where identity is the intended semantics and already the idiom in
+   `pixel_pump.py`'s `on_button_event`. A blanket rewrite would have been a downgrade.
+2. **`except Exception`, not `except BaseException`** — and the distinction is load-bearing rather than
+   stylistic. `reset:soft` is implemented as `sys.exit()`, so a `BaseException` guard would have
+   swallowed it and quietly broken a shipped command. MicroPython puts `SystemExit` under
+   `BaseException` alongside `Exception` (`py/objexcept.c:306`), same as CPython, so the narrower catch
+   lets it through. Verified in the checkout rather than assumed.
+3. **Checked under CPython, not just compiled.** A scratchpad harness (not committed, same shape as
+   Phase 4's) stubs `machine` and drives `parse()` directly: `set_power_mode:high|low` now reaches
+   `PowerMode` and records `HIGH`/`LOW`; a handler that raises is contained and prints
+   `Command failed: …`; `reset:soft` still raises `SystemExit` *through* the guard; `reset:hard` still
+   calls `machine.reset()`. All six changed modules also byte-compile under `mpy-cross`.
+4. **README got more than the two stale items.** The project-layout block still listed the deleted
+   `keyboard.py` and knew nothing of `usb/` or `mapping.py`, and the README described the serial port
+   as the only way to talk to a pump — true before Phase 2, misleading after it. Added a *Talking to a
+   host* section covering the heartbeat, publish-all, the mapping table, the purple `FORWARD` LED and
+   the factory-reset gesture, pointing at `docs/usb-communication.md` for the wire detail. The `act`
+   job names and `tools/*.py` references were already gone, fixed when the README was rewritten in
+   `7a6218e`.
+
+**One thing for Phase 6 to redo rather than inherit.** Phase 6 already ticks "legacy stdin protocol
+still answers", earned on the Phase 4 build — but this phase rewrote the dispatch in `parse()` that
+those commands arrive through. The tick is stale, not wrong: `version:info` and `settings:dump`
+dispatched *because* MicroPython interns short strings, and they now dispatch on value. Re-run both on
+the Phase 5 build, plus `settings:set_power_mode:high|low`, which has never worked on hardware and is
+the one command whose behaviour this phase actually changes.
+
+### On the dev pump *(2026-07-28)*
+
+Flashed over CDC (`bootloader` → copy UF2), and the serial half of the phase checked itself:
+
+- [x] `version:info` and `settings:dump` still answer on the new dispatch — the Phase 6 tick above,
+      re-earned rather than inherited
+- [x] **`settings.json` survived byte-identical again** — dumped before and after the flash and
+      compared key by key. Second upgrade in a row that preserves it
+- [x] **`settings:set_power_mode:high|low` works on hardware for the first time** — `power_mode`
+      flipped 0 → 1 → 0 across two commands, and the pump kept answering afterwards, which is the
+      half that used to be impossible
+- [x] the local UI, checked by hand on the pump: the pulsate animation in both power menus, Low/High
+      stepping in the brightness menu (on release) and the power menus (on press), confirm-vs-cancel
+      in all three, the Lift→Drop long-press route to BOOTSEL, the power-mode LEDs and the audible
+      Low/High motor difference, and mode restore across a power cycle. This is the half of the sweep
+      a shell cannot see — every `==` this phase touched is exercised by that list
+- [x] `tools/phase3_wire_check.py` re-run on this build, all four checks passing — the trigger/pedal
+      split still lands on the right control ids with no leakage either way, `TAP` still precedes
+      `RELEASE` in the same tick, and the heartbeat still reports model 1 with `HAS_MODEL`. Phase 5
+      touches no USB code, so this is a regression guard rather than new evidence, but it is the
+      cheapest proof that a sweep across `Button.tick` left the gesture timing alone
+
+**The guard earned its keep within minutes, on a bug nobody was looking for.**
+`settings:set_brightness` *with no argument* answered `Command failed: list index out of range` and
+the pump carried on. Before this phase that was a dead firmware until power-cycle. The cause is an
+off-by-one in the argument checkers: `check_valid_float_argument` (and its int and hex siblings) test
+`len(arguments) < index` where they mean `<=`, so a *missing final* argument slips past the "Missing
+argument" path and into `float(arguments[index])`, raising `IndexError` — which their `except
+ValueError` does not catch. Every `settings:set_*` command has this shape, so the whole family was one
+truncated line away from killing the pump.
+
+Left unfixed deliberately: the guard has already downgraded it from fatal to a printed message, and
+correcting the comparison changes what a malformed command *answers*, which is host-visible behaviour
+and wider than this phase's brief. Worth its own small change.
+
 ---
 
 ## Phase 6 — Acceptance pass on hardware
@@ -358,8 +430,10 @@ From the issue's acceptance criteria:
 - [ ] `ENTER_BOOTLOADER` (magic `0xB007`) lands the device in BOOTSEL
 - [x] Mapping read/write/commit/reset round-trips; heartbeat timeout restores STANDALONE instantly —
       `tools/phase4_wire_check.py`, 2026-07-28
-- [x] Legacy stdin protocol still answers (`version:info`, `settings:dump`) — both confirmed on the
-      Phase 4 build 2026-07-28
+- [ ] Legacy stdin protocol still answers (`version:info`, `settings:dump`) — both confirmed on the
+      Phase 4 build 2026-07-28, but **re-check on the Phase 5 build**: that phase rewrote the command
+      dispatch these arrive through, from `is` to `==`. Add `settings:set_power_mode:high|low`, which
+      Phase 5 fixed and which has never once worked on hardware
 - [x] Factory reset gesture works — `tools/phase4_wire_check.py` check G, 2026-07-28
 - [x] **Upgrade a unit carrying a real `settings.json` and confirm the file survives** — not listed
       explicitly in the issue, but it is the entire reason the flash offset is frozen. Confirmed

@@ -14,9 +14,9 @@ Two UF2s come out of every build:
 - `firmware-blank.uf2` — MicroPython plus the USB stack, without `src/`. Flash this for development,
   then push `src/` over USB.
 
-> ⚠️ **Branch `firmware-v2` is mid-migration (issue #30, `docs/plans/`).** Phases 0–4 have landed, so
-> both UF2s boot again. Phase 5 (code health & docs) is next, and all open decisions are resolved.
-> Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
+> ⚠️ **Branch `firmware-v2` is mid-migration (issue #30, `docs/plans/`).** Phases 0–5 have landed, so
+> both UF2s boot again. Phase 6 (the acceptance pass on hardware) is next, and all open decisions are
+> resolved. Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
 >
 > Phases 2, 3 and 4 are all verified on a physical pump (2026-07-28), wire checks included —
 > `tools/phase3_wire_check.py` and `tools/phase4_wire_check.py` both pass end to end. Two narrow gaps
@@ -72,7 +72,7 @@ hard-errors on `MICROPY_BOARD_VARIANT`.
 640 KiB firmware / 1408 KiB littlefs, but `memmap_mp_rp2040.ld` is handed the *whole* 2 MB — an
 oversized image links silently and then overwrites the filesystem, `settings.json` included, on first
 boot. The boundary cannot move without wiping every unit in the field, so this check is the only
-guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 392,340 B full, ~59 % of ceiling.
+guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 392,404 B full, ~59 % of ceiling.
 
 | Workflow | Job | Trigger | Release |
 |----------|-----|---------|---------|
@@ -363,14 +363,30 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
 
 Pre-existing, and useful to know before touching the surrounding code:
 
-- `CommunicationManager.parse()` dispatches with `is` on strings built by `line.split(":")`
-  (`if command is "bootloader"`), while its sub-parsers correctly use `==`. Identity comparison on
-  runtime-built strings is not guaranteed, though `bootloader`, `version:info` and `settings:dump`
-  were all confirmed to dispatch on hardware 2026-07-28 — MicroPython interns these. Verify any
-  other branch before trusting it. `PixelPumpStateMachine.__init__` and `Button.tick` have the same
-  `is`-on-int pattern, which is safe: small ints are tagged values, so identity matches value.
-- `settings:set_power_mode` calls `power_mode.HIGH` / `power_mode.LOW`, but `power_mode` is the
-  *module* — the constants live on the `PowerMode` class inside it. This path raises `AttributeError`.
 - Timing uses plain `utime.ticks_ms()` subtraction rather than `utime.ticks_diff()`, so it breaks at
   the ~12.4-day wraparound. Consistent across the codebase; match the surrounding style unless you're
-  deliberately fixing it.
+  deliberately fixing it. New USB code uses `ticks_diff` as ported from PP2 — the two conventions
+  coexist on purpose, and Phase 5 deliberately left the legacy side alone.
+- `CommunicationManager.check_valid_float_argument` and its int/hex siblings test
+  `len(arguments) < index` where they mean `<=`, so a **missing final argument** slips past the
+  "Missing argument" path into `float(arguments[index])` and raises `IndexError` — which their
+  `except ValueError` does not catch. Affects every `settings:set_*` command; confirmed on hardware
+  2026-07-28 with `settings:set_brightness` and no argument. Since Phase 5 this is contained by the
+  `try`/`except` in `tick()` and merely prints `Command failed: list index out of range`, rather than
+  killing the firmware. Still wrong, just no longer fatal.
+- Comparisons are `==` on values and `is` only on objects, as of Phase 5. The surviving `is` compare
+  `Button` *instances* (`btn is self.device.low_button`) and are correct as identity. Don't
+  reintroduce `is` against ints, strings or enum constants: it happened to work for small ints and
+  interned strings, but nothing guarantees it.
+
+Fixed in Phase 5, listed because the symptoms are worth recognising if they resurface:
+
+- `CommunicationManager.parse()` used to dispatch commands with `is` on strings built by
+  `line.split(":")`. It worked only because MicroPython interns short identifiers.
+- `settings:set_power_mode` read `power_mode.HIGH` off the *module* rather than the `PowerMode`
+  class inside it, raising `AttributeError`. Nothing catches exceptions between
+  `CommunicationManager.tick()` and the bare `while True:` in `pixel_pump.py`, so this did not just
+  fail the command — it unwound out of the main loop and killed the firmware until power-cycle.
+  `tick()` now wraps `parse()` in `try`/`except Exception`, which covers the whole class of
+  malformed-input bugs. `SystemExit` derives from `BaseException` in MicroPython
+  (`py/objexcept.c:306`), so `reset:soft` still exits through the guard.

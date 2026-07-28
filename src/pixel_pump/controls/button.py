@@ -77,11 +77,11 @@ class Button:
 
         if self.pulsing:
             # Pulse to?
-            if self.pulseDirection is 1:
+            if self.pulseDirection == 1:
                 self.set_color(self.pulse_to_color, self.pulse_to_Brightness)
                 if self.is_color_set(source_color=self.pulse_to_color, source_brightness=self.pulse_to_Brightness):
                     self.pulseDirection = 2
-            elif self.pulseDirection is 2:
+            elif self.pulseDirection == 2:
                 self.set_color(self.pulse_from_color, self.pulse_from_brightness)
                 if self.is_color_set(source_color=self.pulse_from_color, source_brightness=self.pulse_from_brightness):
                     self.pulseDirection = 1

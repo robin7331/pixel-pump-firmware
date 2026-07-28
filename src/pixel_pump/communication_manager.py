@@ -2,7 +2,7 @@ import select
 import sys
 import machine
 
-from pixel_pump.enums import power_mode
+from pixel_pump.enums.power_mode import PowerMode
 from pixel_pump import version
 
 
@@ -19,20 +19,20 @@ class CommunicationManager:
         command = line.split(":")[0]
         arguments = line.split(":")[1:]
 
-        if command is "bootloader":
+        if command == "bootloader":
             from pixel_pump.states.bootloader_state import BootloaderState
             self.pixel_pump.set_state(BootloaderState(self.pixel_pump))
             return
-    
-        if command is "version":
+
+        if command == "version":
             self.parse_version_cmd(arguments)
             return
-        
-        if command is "reset":
+
+        if command == "reset":
             self.parse_reset_cmd(arguments)
             return
-        
-        if command is "settings":
+
+        if command == "settings":
             self.parse_settings_cmd(arguments)
             return
         
@@ -115,10 +115,10 @@ class CommunicationManager:
             
             target_mode = arguments[1]
             if target_mode == "high":
-                self.pixel_pump.set_power_mode(power_mode.HIGH)
+                self.pixel_pump.set_power_mode(PowerMode.HIGH)
                 return
             if target_mode == "low":
-                self.pixel_pump.set_power_mode(power_mode.LOW)
+                self.pixel_pump.set_power_mode(PowerMode.LOW)
                 return
                         
             return
@@ -229,4 +229,16 @@ class CommunicationManager:
         # check if there is data on the USB port
         if self.poll_object.poll(0):
             line = sys.stdin.readline()
-            self.parse(line.strip())
+            # Nothing between here and the bare `while True:` in pixel_pump.py
+            # catches anything, so an exception raised while handling a command
+            # would not merely fail that command -- it would unwind out of the
+            # main loop and kill the firmware until power-cycle. With a daemon
+            # on the other end of this port that is not an acceptable failure
+            # mode for a malformed line.
+            #
+            # SystemExit derives from BaseException, so `reset:soft` still
+            # exits rather than being swallowed here.
+            try:
+                self.parse(line.strip())
+            except Exception as e:
+                print("Command failed: " + str(e))

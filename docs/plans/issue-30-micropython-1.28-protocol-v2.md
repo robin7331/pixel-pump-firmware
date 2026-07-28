@@ -253,7 +253,16 @@ Still unverified on hardware, and all of it is Phase 4's real substance:
 - [ ] the factory reset gesture
 - [ ] the `SEND_KEY` sentinel actually typing the aux pedal's configured key
 
-A Phase 4 wire check along the lines of `tools/phase3_wire_check.py` is the obvious way to close these.
+`tools/phase4_wire_check.py` covers all five. Checks A–E are automatic; F needs someone to look at the
+pump and press LIFT, and G needs a power cycle and is opt-in. It ends with `RESET_MAPPINGS`, so it
+leaves the pump on the default table.
+
+    DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial \
+        python tools/phase4_wire_check.py
+
+Its one non-obvious trick: whether a `FORWARD` button still acted locally cannot be seen on the vendor
+interface, because publish-all emits the EVENT frame either way. So it reads `mode` back over the CDC
+port instead of asking the operator, which is exactly the judgement a human gets wrong.
 
 ### Deviations, as implemented *(2026-07-28)*
 

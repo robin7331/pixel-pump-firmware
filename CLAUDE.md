@@ -272,11 +272,22 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
   settings manager); until then the four mapping commands answer `ERROR UNKNOWN_COMMAND`.
 - `ENTER_BOOTLOADER` requires magic `0xB007`, `RESET_MAPPINGS` requires `0xDEFA`. A wrong magic is
   `ERROR BAD_MAGIC` and must never reboot the pump mid-assembly.
-- To watch the wire, `tools/phase3_wire_check.py` runs the outstanding Phase 3 checks interactively
-  (`DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid python tools/phase3_wire_check.py`); PP2's
-  `tools/usb-coms` gives a raw frame dump. **Either must be launched from Terminal** — macOS only
-  opens a vendor HID interface for a process holding Input Monitoring, and refuses everything else
-  with "exclusive access and device already open".
+- To watch the wire, two interactive checkers live in `tools/` — `phase3_wire_check.py` (control ids,
+  gestures, heartbeat model) and `phase4_wire_check.py` (the mapping commands, slot switching,
+  remote-mode LED, factory reset). PP2's `tools/usb-coms` gives a raw frame dump.
+
+  ```bash
+  DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid python tools/phase3_wire_check.py
+  DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/phase4_wire_check.py
+  ```
+
+- **Any of them must be launched from Terminal** — macOS only opens a vendor HID interface for a
+  process holding Input Monitoring. But `exclusive access and device already open` has a second,
+  likelier cause that looks identical: **Board Factory's `pixel-pump-daemon` holds the interface**
+  whenever its dev app runs. Check `pgrep -fl pixel-pump-daemon` before touching System Settings.
+- `phase4_wire_check.py` reads `mode` back over CDC to judge whether a `FORWARD` button still acted
+  locally. That question cannot be answered on the vendor interface — publish-all emits the EVENT
+  frame either way.
 
 ## Mapping engine (`mapping.py`)
 
@@ -311,8 +322,8 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
 ## Notes
 
 - This is MicroPython — use `machine`, `rp2`, `utime`, `ujson`, not CPython equivalents. The only
-  CPython files in the repo are the two under `tools/`: `generateVersionFile.py`, which runs on the
-  CI host, and `phase3_wire_check.py`, which runs on a developer's machine.
+  CPython files in the repo are the three under `tools/`: `generateVersionFile.py`, which runs on the
+  CI host, and `phase3_wire_check.py` / `phase4_wire_check.py`, which run on a developer's machine.
 - No test framework, no linter, no formatter. Testing is manual, on hardware.
 - USB identity: VID `0x2E8A`, PID `0x1061`, "Robins Tools" / "Pixel Pump" (`boards/PIXEL_PUMP/mpconfigboard.h`).
   `0x2E8A` is Raspberry Pi's vendor ID; `0x1061` is the product ID they assigned for the Pixel Pump 1

@@ -14,8 +14,10 @@ modernize the Pixel Pump 1 firmware so it works with Board Factory, then freeze 
   the way they are. ~450 MB including build dirs. Do not re-clone; the disk runs close to full
   (12 GiB free, 98 %).
 - **Status:** Phase 0 landed in `c7614cd`, Phase 1 in `ebeea4c`, Phase 2 in this branch and verified on
-  a physical pump 2026-07-28 — see *Deviations* for what changed against this plan. Phase 3 is next.
-  All four open decisions were resolved 2026-07-28 — see *Decisions* at the bottom.
+  a physical pump 2026-07-28 — see *Deviations* for what changed against this plan. Phase 3 landed in
+  this branch the same day with its gate **half closed** — local behaviour verified on hardware, wire
+  level not. Phase 4 is next. All four open decisions were resolved 2026-07-28 — see *Decisions* at
+  the bottom.
 
 Phases are sequenced so each one ends at something testable on real hardware, and so the riskiest
 unknowns get answered first. There is no test framework here — every gate is a manual check on a
@@ -148,6 +150,40 @@ rides on the trigger button, so pedal presses publish as `TRIGGER_BTN` rather th
 **Gate:** side-by-side against a legacy unit — modes, LED feel, Reverse's 0/100/200 ms valve stagger,
 pedal, aux-pedal keys all identical. This is where the accepted deviation appears: LOW/HIGH released
 between 300 and 750 ms now does nothing (legacy fired on any release).
+
+**Gate status 2026-07-28: local half passed, wire half outstanding.** Everything above was checked by
+hand on the dev pump, including the pedal/button interleave the refcount exists for. What was *not*
+checked is what the host sees, and it is the part this phase is really about:
+
+- [ ] the foot pedal publishes `FPEDAL` (7) — and **no** frame leaks onto `TRIGGER_BTN` (15)
+- [ ] the trigger button publishes `TRIGGER_BTN` (15) and nothing onto `FPEDAL`
+- [ ] buttons emit `TAP`, ahead of `RELEASE` in the same tick
+- [ ] the heartbeat still reports model 1 with `HAS_MODEL`
+
+Checking these needs the vendor HID interface, which macOS only hands to a process holding Input
+Monitoring — it must be launched from Terminal, not from an agent shell. PP2's `tools/usb-coms` will
+show the frames; note it cannot assert the *absence* of the wrong control id, which is the actual
+regression risk here.
+
+### Deviations, as implemented *(2026-07-28)*
+
+1. **`ButtonEvent` gained `TAPPED = 4`; the existing names stayed.** Renaming the enum to the wire
+   vocabulary (PRESS/RELEASE/…) would have rippled through every state for no behavioural gain —
+   `_button_event_to_usb_event_kind` already does that translation. `Button` also gained
+   `long_press_threshold` / `tapped_threshold` / `on_tapped`, mirroring `IOEventSource`'s signature,
+   and its `secondary_switch_pin` support was deleted outright rather than merely unwired: re-merging
+   two controls onto one button is exactly what this phase exists to undo.
+2. **Only LOW/HIGH moved to `TAPPED`.** LIFT/DROP/REVERSE still act on `TOUCH_DOWN`, per the spec's
+   PP1 default table (`PRESS`), and the settings states keep their legacy in-menu handling
+   (`TOUCH_UP` for brightness steps, `TOUCH_DOWN` for power steps). So the only behaviour change is
+   the accepted one in the gate above.
+3. **The refcount lives in `pixel_pump.py`,** as a module-level `_pump_holders` set plus
+   `pump_trigger_press()` / `pump_trigger_release()`, keyed on `ControlId.TRIGGER_BTN` /
+   `ControlId.FPEDAL`. Same reasoning as Phase 2's deviation 4 — Phase 4's dispatcher takes it over
+   from the callbacks, and keying it on control ids now is what makes that a lift-and-shift.
+4. **Trigger LED feedback needed no special handling.** Both controls funnel into the same
+   `state.trigger_on()` / `trigger_off()`, and the states are what drive `trigger_button`'s
+   pulsate/solid colours, so pedal-driven pumping animates the trigger button for free.
 
 ---
 

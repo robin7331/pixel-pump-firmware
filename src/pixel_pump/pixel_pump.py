@@ -174,8 +174,6 @@ DMA_TREQ_PUT_VAL    = DMA_TREQ_TX_VAL   # Put to PIO
 
 machine.freq(96000000)
 
-foot_aux = Pin(7, Pin.IN, Pin.PULL_DOWN)
-
 motor = Motor(motorPin=5)
 
 # The UI Renderer class holds the frame buffer and the PIO state machine
@@ -221,19 +219,41 @@ def reverse_buttonTouchDown(btn):
     pixel_pump.state.to_reverse()
 
 
-def trigger_buttonTouchDown(btn):
+# The trigger button (GPIO13) and the foot pedal (GPIO6) are independent
+# controls that both run the vacuum, so the state machine is driven off a set
+# of holders rather than off either control directly. Without it, "hold pedal,
+# tap button, release button" would stop the pump mid-pick.
+_pump_holders = set()
+
+
+def pump_trigger_press(holder):
     global pixel_pump
-    pixel_pump.state.trigger_on()
+    if holder in _pump_holders:
+        return
+    was_idle = not _pump_holders
+    _pump_holders.add(holder)
+    if was_idle:
+        pixel_pump.state.trigger_on()
+
+
+def pump_trigger_release(holder):
+    global pixel_pump
+    if holder not in _pump_holders:
+        return
+    _pump_holders.remove(holder)
+    if not _pump_holders:
+        pixel_pump.state.trigger_off()
+
+
+def trigger_buttonTouchDown(btn):
+    pump_trigger_press(ControlId.TRIGGER_BTN)
 
 
 def trigger_buttonTouchUp(btn):
-    global pixel_pump
-    pixel_pump.state.trigger_off()
+    pump_trigger_release(ControlId.TRIGGER_BTN)
 
 
-# Controls are identified on the wire by Button.title. Phase 3 splits GPIO6
-# (the foot pedal) out of the trigger button; until then the pedal is OR'd into
-# it and both publish as TRIGGER_BTN.
+# Controls are identified on the wire by Button.title.
 _BUTTON_CONTROL_IDS = {
     'Lift': ControlId.LIFT,
     'Drop': ControlId.DROP,
@@ -245,12 +265,12 @@ _BUTTON_CONTROL_IDS = {
 
 
 def _button_event_to_usb_event_kind(event):
-    # Button has no tap detection yet -- that arrives with the gesture work in
-    # Phase 3, together with EventKind.TAP for these controls.
     if event == ButtonEvent.TOUCH_DOWN:
         return EventKind.PRESS
     if event == ButtonEvent.TOUCH_UP:
         return EventKind.RELEASE
+    if event == ButtonEvent.TAPPED:
+        return EventKind.TAP
     if event == ButtonEvent.TOUCH:
         return EventKind.HOLD
     if event == ButtonEvent.LONG_PRESS:
@@ -283,7 +303,21 @@ def on_button_event(btn, event):
     if control_id is not None and event_kind is not None:
         usb_manager.publish_event(control_id, event_kind)
 
-def on_event(source, event):
+def on_foot_pedal_event(source, event):
+    # The pedal has no LEDs of its own; the trigger button's pulsate/solid
+    # feedback follows because both controls funnel into the same state
+    # intents.
+    if event == IOEvent.ACTIVATE:
+        pump_trigger_press(ControlId.FPEDAL)
+    if event == IOEvent.DEACTIVATE:
+        pump_trigger_release(ControlId.FPEDAL)
+
+    event_kind = _io_event_to_usb_event_kind(event)
+    if event_kind is not None:
+        usb_manager.publish_event(ControlId.FPEDAL, event_kind)
+
+
+def on_aux_pedal_event(source, event):
     global pixel_pump
     # https://deskthority.net/wiki/Scancode for keyboard codes
     if event == IOEvent.TAPPED:
@@ -346,13 +380,14 @@ trigger_button = Button(title='Trigger',
                         left_led_index=10,
                         right_led_index=11,
                         switch_pin=13,
-                        secondary_switch_pin=6,
                         on_button_event=on_button_event,
                         on_touch_up=trigger_buttonTouchUp,
                         on_touch_down=trigger_buttonTouchDown,
                         on_should_render=renderBtn)
 
-secondary_pedal = IOEventSource(title='Secondary Trigger', pin_number=7, pin_mode=Pin.IN, pin_pull=Pin.PULL_DOWN, on_event=on_event)
+foot_pedal = IOEventSource(title='Foot Pedal', pin_number=6, pin_mode=Pin.IN, pin_pull=Pin.PULL_DOWN, on_event=on_foot_pedal_event)
+
+secondary_pedal = IOEventSource(title='Secondary Trigger', pin_number=7, pin_mode=Pin.IN, pin_pull=Pin.PULL_DOWN, on_event=on_aux_pedal_event)
 
 no_valve = Valve(2)
 nc_valve = Valve(3)
@@ -392,6 +427,7 @@ while True:
     reverse_button.tick()
     trigger_button.tick()
 
+    foot_pedal.tick()
     secondary_pedal.tick()
 
     no_valve.tick()

@@ -4,3 +4,4 @@ class ButtonEvent:
     TOUCH_UP = 1
     TOUCH = 2
     LONG_PRESS = 3
+    TAPPED = 4

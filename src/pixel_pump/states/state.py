@@ -30,14 +30,17 @@ class State:
         pass
 
     def on_button_event(self, button, event):
+        # Low/High select on TAPPED, not on any release: the mapping engine
+        # keys these off the TAP gesture. Accepted deviation from legacy --
+        # a release between 300 and 750 ms now does nothing.
         if button is self.device.low_button:
-            if event is ButtonEvent.TOUCH_UP:
+            if event == ButtonEvent.TAPPED:
                 self.device.set_power_mode(PowerMode.LOW)
             if event is ButtonEvent.LONG_PRESS:
                 from .low_power_settings_state import LowPowerSettingsState
                 self.device.set_state(LowPowerSettingsState(self.device))
         if button is self.device.high_button:
-            if event is ButtonEvent.TOUCH_UP:
+            if event == ButtonEvent.TAPPED:
                 self.device.set_power_mode(PowerMode.HIGH)
             if event is ButtonEvent.LONG_PRESS:
                 from .high_power_settings_state import HighPowerSettingsState

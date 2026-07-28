@@ -14,12 +14,15 @@ Two UF2s come out of every build:
 - `firmware-blank.uf2` — MicroPython plus the USB stack, without `src/`. Flash this for development,
   then push `src/` over USB.
 
-> ⚠️ **Branch `firmware-v2` is mid-migration (issue #30, `docs/plans/`).** Phases 0, 1 and 2 have
-> landed, so both UF2s boot again. Phase 3 (gestures + the trigger/pedal split) is next, and all open
-> decisions are resolved. Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching
-> USB code.
+> ⚠️ **Branch `firmware-v2` is mid-migration (issue #30, `docs/plans/`).** Phases 0–3 have landed, so
+> both UF2s boot again. Phase 4 (the mapping engine) is next, and all open decisions are resolved.
+> Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
 >
-> Phase 2 was verified on a physical pump on 2026-07-28.
+> Phase 2 was verified on a physical pump on 2026-07-28. **Phase 3's gate is only half closed:** its
+> local behaviour was checked by hand the same day, but the wire-level half was not — that the foot
+> pedal publishes `FPEDAL` and not `TRIGGER_BTN`, that buttons emit `TAP`, and that the heartbeat
+> still reports model 1. Phase 4 sits directly on those frames, so confirm them before blaming Phase 4
+> for anything odd there.
 
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.25, async). Different
 > architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept
@@ -109,7 +112,7 @@ setup code that constructs all hardware objects and then runs a bare `while True
 bottom. Importing it *is* starting the firmware.
 
 ```
-lift/drop/low/high/reverse/trigger .tick() → secondary_pedal.tick()
+lift/drop/low/high/reverse/trigger .tick() → foot_pedal.tick() → secondary_pedal.tick()
   → no/nc/three_way valve.tick() → motor.tick()
   → pixel_pump.tick(ticks_ms) → communication_manager.tick() → usb_manager.tick()
   → renderer.flush_frame_buffer()  (throttled to every 33 ms)
@@ -129,7 +132,7 @@ they just forward to `pixel_pump.state.<intent>()`.
 
 | State | Entered by | Behaviour |
 |-------|-----------|-----------|
-| `LiftState` | Lift tap | Trigger held = vacuum on; release vents via NC valve after 500 ms |
+| `LiftState` | Lift press | Trigger held = vacuum on; release vents via NC valve after 500 ms |
 | `DropState` | Drop tap | Latching — trigger toggles run/pause instead of momentary |
 | `ReverseState` | Reverse tap | Forces `PowerMode.MAX`, sequences all three valves; restores previous mode on exit |
 | `BrightnessSettingsState` | Long-press Lift | Low/High adjust global LED brightness; long-press Drop → bootloader |
@@ -151,11 +154,19 @@ Conventions worth preserving:
 ### Key patterns
 
 - **Callback wiring**: `Button` and `IOEventSource` take `on_*` callbacks. Nothing subclasses them.
-- **`Button`** (`controls/button.py`): polled (no debounce), 750 ms long-press threshold, drives two
-  LED indices, lerps toward a target colour at 30 FPS, supports `pulsate()` ping-pong animation. A
-  button may have a `secondary_switch_pin` OR'd in — the trigger button also answers to the foot pedal.
+- **`Button`** (`controls/button.py`): polled (no debounce), drives two LED indices, lerps toward a
+  target colour at 30 FPS, supports `pulsate()` ping-pong animation. Emits TOUCH_DOWN, TOUCH_UP,
+  TOUCH, TAPPED (50–300 ms) and LONG_PRESS (>750 ms) — the same gesture set and thresholds as
+  `IOEventSource`, and on a quick release TAPPED precedes TOUCH_UP. One button drives exactly one
+  pin; the `secondary_switch_pin` OR went away with the trigger/pedal split in Phase 3.
 - **`IOEventSource`** (`controls/io_event_source.py`): raw GPIO → events (ACTIVATE, DEACTIVATE, HOLD,
-  TAPPED 50–300 ms, LONG_HOLD >750 ms). Only used for the secondary pedal.
+  TAPPED 50–300 ms, LONG_HOLD >750 ms). Used for both pedals — `foot_pedal` (GPIO6) and
+  `secondary_pedal` (GPIO7).
+- **Pump holders** (`pixel_pump.py`): the trigger button and the foot pedal are independent controls
+  that both run the vacuum, so `pump_trigger_press/release()` refcount them through a `_pump_holders`
+  set and only call `state.trigger_on()` / `trigger_off()` on the 0↔1 edge. Without it, "hold pedal,
+  tap button, release button" would stop the pump mid-pick. The pedal has no LEDs, so the trigger
+  button's feedback follows because both funnel into the same state intents.
 - **Delayed valve actions**: `valve.activate(delay_ms)` / `deactivate(delay_ms)` schedule against
   `tick()` — this is how reverse mode staggers its three valves (0/100/200 ms).
 - **Motor safety timeout**: 60 s, fires `on_timeout` → `state.on_motor_timeout()`.
@@ -194,7 +205,7 @@ available, not yet adopted:
 | 3 | `VALVE_NC` | Normally-closed valve (vent) |
 | 4 | `VALVE_3W` | Three-way valve |
 | 5 | `PUMP` | Pump motor PWM (10 kHz) |
-| 6 | `FPEDAL` | Foot pedal — wired as the trigger button's secondary switch |
+| 6 | `FPEDAL` | Foot pedal (`IOEventSource`) — runs the vacuum alongside the trigger button |
 | 7 | `FPEDAL_AUX` | Secondary foot pedal (`IOEventSource`, sends HID keys) |
 | 8 / 9 | `BTN_LIFT` / `BTN_DROP` | Lift / Drop buttons |
 | 10 / 11 | `BTN_HIGH` / `BTN_LOW` | High / Low buttons (note: High is 10, Low is 11) |
@@ -240,12 +251,12 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
   *active* only while it writes to the vendor OUT path (1200 ms timeout) — opening the interface is
   not enough.
 - **Publish-all rule:** while the host is active, *every* control publishes EVENT frames, whatever it
-  also does locally. The wiring lives in `pixel_pump.py`'s `on_button_event` / `on_event`, keyed on
-  `Button.title` via `_BUTTON_CONTROL_IDS` — rename a button and it silently stops publishing.
-- Buttons currently publish PRESS / RELEASE / HOLD / LONG_HOLD only. `Button` has no tap detection,
-  so **no `TAP` frames for buttons** until Phase 3; the aux pedal (`IOEventSource`) does send `TAP`.
-- GPIO6 is still OR'd into the trigger button, so foot-pedal presses publish as `TRIGGER_BTN`, not
-  `FPEDAL`. Phase 3 splits them.
+  also does locally. The wiring lives in `pixel_pump.py`'s `on_button_event`, `on_foot_pedal_event`
+  and `on_aux_pedal_event`; buttons are keyed on `Button.title` via `_BUTTON_CONTROL_IDS` — rename a
+  button and it silently stops publishing.
+- Every control publishes the full gesture set: PRESS / RELEASE / TAP / HOLD / LONG_HOLD. HOLD is
+  throttled to one frame per 120 ms per control in `USBManager`.
+- The trigger button (`TRIGGER_BTN`, GPIO13) and the foot pedal (`FPEDAL`, GPIO6) publish separately.
 - The four mapping commands answer `ERROR UNKNOWN_COMMAND` until Phase 4 supplies a table —
   `USBManager(mapping=...)` is the seam, and its docstring is the contract that `mapping.py` must meet.
 - `ENTER_BOOTLOADER` requires magic `0xB007`, `RESET_MAPPINGS` requires `0xDEFA`. A wrong magic is
@@ -292,12 +303,12 @@ Pre-existing, and useful to know before touching the surrounding code:
 
 - `CommunicationManager.parse()` dispatches with `is` on strings built by `line.split(":")`
   (`if command is "bootloader"`), while its sub-parsers correctly use `==`. Identity comparison on
-  runtime-built strings is not guaranteed — verify on hardware before trusting any of those branches.
-  `PixelPumpStateMachine.__init__` and `Button.tick` have the same `is`-on-int pattern.
+  runtime-built strings is not guaranteed, though `bootloader`, `version:info` and `settings:dump`
+  were all confirmed to dispatch on hardware 2026-07-28 — MicroPython interns these. Verify any
+  other branch before trusting it. `PixelPumpStateMachine.__init__` and `Button.tick` have the same
+  `is`-on-int pattern, which is safe: small ints are tagged values, so identity matches value.
 - `settings:set_power_mode` calls `power_mode.HIGH` / `power_mode.LOW`, but `power_mode` is the
   *module* — the constants live on the `PowerMode` class inside it. This path raises `AttributeError`.
 - Timing uses plain `utime.ticks_ms()` subtraction rather than `utime.ticks_diff()`, so it breaks at
   the ~12.4-day wraparound. Consistent across the codebase; match the surrounding style unless you're
   deliberately fixing it.
-- `pixel_pump.py` creates a stray `foot_aux = Pin(7, ...)` that nothing reads; `secondary_pedal` owns
-  that pin.

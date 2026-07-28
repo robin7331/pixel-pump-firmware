@@ -431,12 +431,46 @@ future mistake in a command handler from taking the pump down with it.
 
 From the issue's acceptance criteria:
 
-- [ ] Legacy-identical out of the box (state machine, LEDs, valve timing incl. Reverse's staggered
-      100/200 ms sequencing, pedal, keyboard emulation)
-- [ ] Daemon connects, reports model 1 + firmware version, receives button events
-- [ ] `ENTER_BOOTLOADER` (magic `0xB007`) lands the device in BOOTSEL
+- [~] Legacy-identical out of the box (state machine, LEDs, valve timing incl. Reverse's staggered
+      100/200 ms sequencing, pedal, keyboard emulation) — **cannot be closed as written; there is only
+      one pump** (confirmed 2026-07-28). The criterion asks for a side-by-side against a legacy unit,
+      and a single device cannot answer it. Substituted by the by-hand pass on the Phase 5 build:
+      every mode, the pulsate animation, both settings menus with confirm-and-cancel, the LONG_PRESS
+      route to BOOTSEL, the power-mode LEDs, the audible Low/High difference, and mode restore across
+      a power cycle. Recorded as **weaker evidence than the criterion asks for**, deliberately: it
+      compares the firmware against documented legacy behaviour and memory of the old unit, not
+      against a legacy unit running. Two specifics in the criterion were never directly compared —
+      Reverse's 0/100/200 ms valve stagger was confirmed as *sequencing*, by ear and eye, not as
+      *timing*, and keyboard emulation is still the open aux-pedal gap below. If a legacy unit ever
+      turns up, this is the item to re-run before trusting the comparison
+- [ ] Daemon connects, reports model 1 + firmware version, receives button events — **blocked on
+      `board-factory#4`, not on this firmware.** Board Factory currently labels a connected PP1
+      "Pixel Pump 2". That is neither a firmware bug nor a stale install: the daemon does not parse
+      the model byte at all (nothing in `rust/pixel-pump-daemon/src/protocol.rs` reads byte 3 or
+      `HAS_MODEL`), and the app hardcodes the name — `pump-status-bar-item.tsx:13`,
+      `const PUMP_MODEL = 'Pixel Pump 2'`, with a comment saying the telemetry carries no product
+      string. Written when a PP2 was the only pump there was. `board-factory#4` covers exactly this
+      (daemon: "parse model ID from device heartbeats (byte 3 when flag `0x08` set)"; app: a profile
+      registry keyed by model ID), so the item closes when that lands. The device half is provable
+      today with `tools/phase6_acceptance.py` checks A and B, and `phase3_wire_check.py` already
+      confirmed the heartbeat carries model 1 with `HAS_MODEL`
+- [ ] `ENTER_BOOTLOADER` (magic `0xB007`) lands the device in BOOTSEL — `tools/phase6_acceptance.py`
+      check D covers it; not yet run, because the daemon held the interface
+- [x] Mapping read/write/commit/reset round-trips; heartbeat timeout restores STANDALONE instantly —
+      `tools/phase4_wire_check.py`, 2026-07-28
+- [x] Legacy stdin protocol still answers — re-earned on the Phase 5 build 2026-07-28, after that
+      phase rewrote the dispatch these arrive through from `is` to `==`. `version:info` and
+      `settings:dump` answer, `settings:set_power_mode:high|low` works for the first time, and every
+      `settings:set_*` reports `Missing argument` / `Invalid argument` without disturbing the stored
+      value or the main loop
+- [x] Factory reset gesture works — `tools/phase4_wire_check.py` check G, 2026-07-28
+- [x] **Upgrade a unit carrying a real `settings.json` and confirm the file survives** — not listed
+      explicitly in the issue, but it is the entire reason the flash offset is frozen. Confirmed
+      2026-07-28 on the dev pump upgrading Phase 2/3 → Phase 4; see Phase 4's gate
 
-`tools/phase6_acceptance.py` covers the device half of the middle item and all of the last one:
+### `tools/phase6_acceptance.py`
+
+Covers the device half of the daemon item and all of the bootloader one:
 
 - **Check A** — `GET_VERSION`, cross-checked three ways. The ACK, the device heartbeat and the legacy
   `version:info` over CDC must agree. The CDC route is worth the trouble because it reads `version.py`
@@ -456,26 +490,23 @@ background heartbeat), `ModeProbe`, `expect_error`, the daemon warning — rathe
 hundred lines. `ModeProbe` gained a `version_info()` method for check A; that is additive, so the
 Phase 4 tool is unaffected.
 
-**What no script can close**, and what therefore still needs a human:
+**Board Factory's daemon holds the vendor interface exclusively**, so the app and any checker cannot
+observe the pump at the same time. Quit Board Factory first, and check `pgrep -fl pixel-pump-daemon`
+when an open fails — the hidapi error is identical to the missing-Input-Monitoring one.
 
-- *Legacy-identical out of the box* wants a legacy unit next to an updated one. One pump cannot answer
-  it, and the closest honest substitute is the by-hand pass already done in Phase 5.
-- *The daemon connects* is a claim about Board Factory, not about the firmware. Check A and B prove the
-  device answers correctly; whether the app is happy with those answers is a different question and
-  only the app can settle it. Note the daemon holds the vendor interface exclusively, so the two cannot
-  be observed at the same time — quit Board Factory before running any checker, and `pgrep -fl
-  pixel-pump-daemon` when the open fails.
-- [x] Mapping read/write/commit/reset round-trips; heartbeat timeout restores STANDALONE instantly —
-      `tools/phase4_wire_check.py`, 2026-07-28
-- [x] Legacy stdin protocol still answers — re-earned on the Phase 5 build 2026-07-28, after that
-      phase rewrote the dispatch these arrive through from `is` to `==`. `version:info` and
-      `settings:dump` answer, `settings:set_power_mode:high|low` works for the first time, and every
-      `settings:set_*` reports `Missing argument` / `Invalid argument` without disturbing the stored
-      value or the main loop
-- [x] Factory reset gesture works — `tools/phase4_wire_check.py` check G, 2026-07-28
-- [x] **Upgrade a unit carrying a real `settings.json` and confirm the file survives** — not listed
-      explicitly in the issue, but it is the entire reason the flash offset is frozen. Confirmed
-      2026-07-28 on the dev pump upgrading Phase 2/3 → Phase 4; see Phase 4's gate
+### Where this leaves issue #30
+
+Everything in this repo is done. The three unticked items above are **not firmware work**:
+
+| Item | Blocked on | Closable by |
+|------|-----------|-------------|
+| Legacy-identical | only one pump exists | nothing here — substituted, see above |
+| Daemon reports model 1 | `board-factory#4` | that issue landing |
+| `ENTER_BOOTLOADER` | nobody has run it yet | `tools/phase6_acceptance.py`, 30 seconds |
+
+So the honest state is: **PP1 firmware is finished and verified as far as one pump and this repo
+allow.** Freezing it does not wait on `board-factory#4` — that issue changes what the *app* displays,
+not what the firmware sends, and the firmware's side of that contract is already proven on the wire.
 
 ---
 

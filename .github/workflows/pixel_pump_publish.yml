@@ -1,0 +1,158 @@
+# pixel_pump_publish: Publish click on a reviewed draft → website feed ingest.
+#
+# pixel_pump_main.yml builds on tag push and creates a DRAFT release as its
+# last step — the draft (and its firmware.uf2 asset) only exists if the build
+# was green. Publishing that draft fires this workflow, which delivers the
+# firmware to the website in ONE multipart POST. The endpoint is atomic
+# (verify sha512 → store → flip the feed), so a failed POST published nothing
+# and the previous release keeps serving. Contract: issue #34 /
+# robins-tools/robins-tools-website#12; the line is the PP1 sibling of PP2's,
+# byte-identical in shape — only the URL prefix, the token and the artifact
+# filename differ. Ported from pixel-pump-two-firmware's workflow of the same
+# name; keep the two in step.
+#
+# Secrets required:
+#   PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN  shared ingest secret — same value as
+#                                          the website's Forge env var of the
+#                                          same name. Note the ONE: the URL
+#                                          slug is pixel-pump-firmware, the
+#                                          token is not.
+
+name: Pixel Pump Publish
+
+on:
+  release:
+    types: [published]
+  # Recovery path: a release event snapshots the workflow file at the tag's
+  # commit, so a workflow fix landed on main after a failed publish can only
+  # run via manual dispatch.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v1.0.2)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pixel-pump-publish-${{ github.event.release.tag_name || github.event.inputs.tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  INGEST_URL: https://robins-tools.com/downloads/pixel-pump-firmware/releases
+  FEED_URL: https://robins-tools.com/downloads/pixel-pump-firmware/latest.yml
+
+jobs:
+  publish:
+    # Also what keeps this repo's dead tags out of the feed — `latest` (the
+    # retired dev workflow's rolling prerelease) and the stray `false` do not
+    # start with 'v', so publishing either is a no-op rather than a bad ingest.
+    if: startsWith(github.event.release.tag_name || github.event.inputs.tag, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+
+    steps:
+      - name: Assert ingest secret exists
+        env:
+          TOKEN: ${{ secrets.PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN }}
+        run: |
+          [ -n "$TOKEN" ] || { echo "::error::PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN secret is missing — set it with 'gh secret set PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN', same value as the website's Forge env var of the same name (issue #34)"; exit 1; }
+
+      # The device reports exactly major.minor.patch over USB — a prerelease
+      # suffix cannot exist on the wire, so none may reach the feed. This
+      # repo's legacy malformed tag v.0.0.4 must fail here.
+      - name: Derive version from tag
+        run: |
+          version="${TAG#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::'$version' (from tag $TAG) is not strict major.minor.patch semver"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # Only firmware.uf2 goes to the website — firmware-blank.uf2 is the
+      # development image and stays a GitHub-release-only artifact. The asset
+      # only exists if the pixel_pump_main.yml build was green, so a
+      # hand-created release with no build behind it fails here, before
+      # anything is pushed.
+      - name: Download firmware from release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern firmware.uf2 --dir assets
+          test -f assets/firmware.uf2 || { echo "::error::firmware.uf2 missing from the release assets — was this draft created by pixel_pump_main.yml?"; exit 1; }
+          mv assets/firmware.uf2 "assets/pixel-pump-firmware-$VERSION.uf2"
+          echo "ARTIFACT=pixel-pump-firmware-$VERSION.uf2" >> "$GITHUB_ENV"
+          ls -lh assets/
+
+      # The release body is polished markdown. The manifest's notes wants
+      # plain text; the POST's notes field keeps the markdown. Fetched via gh
+      # (works for both triggers) and written straight to files — free-form
+      # text that may contain quotes/backticks is never string-interpolated.
+      - name: Convert release body to plain text
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          command -v pandoc >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq pandoc; }
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > release-body.md
+          # a bodyless release yields a lone newline — normalize to truly
+          # empty so the -s guards (no notes key, no notes field) hold
+          [ -z "$(tr -d '[:space:]' < release-body.md)" ] && : > release-body.md
+          pandoc -f gfm -t plain --wrap=none release-body.md -o release-notes.txt
+          echo "== plain-text notes:"
+          cat release-notes.txt
+
+      # The website stores and serves this byte-for-byte — CI is the author.
+      # Serialized with yq, never hand-templated — notes are arbitrary text
+      # (colons, quotes, newlines). No electron-updater legacy fields.
+      - name: Generate latest.yml
+        run: |
+          export SHA512="$(openssl dgst -sha512 -binary "assets/$ARTIFACT" | base64 -w0)"
+          export SIZE="$(stat -c%s "assets/$ARTIFACT")"
+          export DATE="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          yq -n '
+            .version = strenv(VERSION) |
+            .files = [{"url": strenv(ARTIFACT), "sha512": strenv(SHA512), "size": env(SIZE)}] |
+            .releaseDate = strenv(DATE)
+          ' > latest.yml
+          if [ -s release-notes.txt ]; then
+            NOTES="$(cat release-notes.txt)" yq -i '.notes = strenv(NOTES)' latest.yml
+          fi
+          echo "== final latest.yml:"
+          cat latest.yml
+
+      # One POST, everything in it. No auto-retry: republish-is-replace makes
+      # a manual re-run safe, and ingest is atomic — a failed POST published
+      # nothing.
+      - name: POST release to website ingest
+        env:
+          TOKEN: ${{ secrets.PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN }}
+        run: |
+          form_args=(
+            -F "version=$VERSION"
+            -F "yml=@latest.yml"
+            -F "files[]=@assets/$ARTIFACT"
+          )
+          [ -s release-body.md ] && form_args+=( -F "notes=<release-body.md" )
+          curl -sS --fail-with-body \
+            --max-time 300 \
+            -H "Authorization: Bearer $TOKEN" \
+            "${form_args[@]}" \
+            "$INGEST_URL"
+
+      - name: Verify production feed
+        run: |
+          curl -sfS "$FEED_URL" -o served.yml
+          echo "== served feed:"
+          cat served.yml
+          served_version="$(yq '.version' served.yml)"
+          [ "$served_version" = "$VERSION" ] \
+            || { echo "::error::feed serves '$served_version', expected '$VERSION'"; exit 1; }
+          curl -sfSI "${FEED_URL%latest.yml}$ARTIFACT" -o /dev/null \
+            || { echo "::error::artifact '$ARTIFACT' is in the feed but not downloadable"; exit 1; }
+          echo "feed serves $served_version and '$ARTIFACT' answers — publish complete"

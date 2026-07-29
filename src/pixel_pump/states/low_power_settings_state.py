@@ -4,6 +4,8 @@ from pixel_pump.enums import Colors, Brightness
 from .state import State
 
 class LowPowerSettingsState(State):
+    suspends_mapping = True
+
     def __init__(self, device):
         super().__init__(device)
         self.old_power_setting = None
@@ -29,9 +31,9 @@ class LowPowerSettingsState(State):
         self.device.set_power_mode(self.old_power_mode)
 
     def on_button_event(self, btn, event):
-        if btn is self.device.low_button and event is ButtonEvent.TOUCH_DOWN:
+        if btn is self.device.low_button and event == ButtonEvent.TOUCH_DOWN:
             self.device.set_low_power_setting(self.device.low_power_setting - 5)
-        if btn is self.device.high_button and event is ButtonEvent.TOUCH_DOWN:
+        if btn is self.device.high_button and event == ButtonEvent.TOUCH_DOWN:
             self.device.set_low_power_setting(self.device.low_power_setting + 5)
 
     def to_reverse(self):

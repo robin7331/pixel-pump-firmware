@@ -60,5 +60,16 @@ class ReverseState(State):
         self.device.nc_valve.deactivate(100)
         self.device.three_way_valve.deactivate(200)
 
-    def on_button_event(self, button, event):
+    # Reverse forces PowerMode.MAX, so the power intents are inert here --
+    # legacy did the same by overriding on_button_event to a no-op.
+    def to_power_low(self):
+        pass
+
+    def to_power_high(self):
+        pass
+
+    def to_low_power_settings(self):
+        pass
+
+    def to_high_power_settings(self):
         pass

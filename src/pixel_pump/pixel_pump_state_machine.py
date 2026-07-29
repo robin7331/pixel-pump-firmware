@@ -1,5 +1,4 @@
 
-from .settings_manager import SettingsManager
 from .states.lift_state import LiftState
 from .states.drop_state import DropState
 from .states.reverse_state import ReverseState
@@ -9,7 +8,7 @@ from .enums.colors import Colors
 
 
 class PixelPumpStateMachine:
-    def __init__(self, motor, ui_renderer, lift_button, drop_button, low_button, high_button, reverse_button, trigger_button, nc_valve, no_valve, three_way_valve):
+    def __init__(self, motor, ui_renderer, lift_button, drop_button, low_button, high_button, reverse_button, trigger_button, nc_valve, no_valve, three_way_valve, settings_manager):
         self.motor = motor
         self.ui_renderer = ui_renderer
         self.lift_button = lift_button
@@ -30,7 +29,11 @@ class PixelPumpStateMachine:
         self.low_power_setting = 0
         self.high_power_setting = 0
 
-        self.settings_manager = SettingsManager()
+        # Passed in rather than constructed here: pixel_pump.py needs
+        # keyboard_enabled before it initializes USB, which happens long before
+        # this object exists. Sharing the one instance keeps the enumerated
+        # device and the running firmware reading the same settings.json.
+        self.settings_manager = settings_manager
         self.ui_renderer.brightness_modifier = self.settings_manager.get_brightness()
         power_mode = self.settings_manager.get_power_mode()
 
@@ -42,11 +45,11 @@ class PixelPumpStateMachine:
             motor)
 
         mode = self.settings_manager.get_mode()
-        if mode is 0:
+        if mode == 0:
             self.set_state(LiftState(self))
-        elif mode is 1:
+        elif mode == 1:
             self.set_state(DropState(self))
-        elif mode is 2:
+        elif mode == 2:
             self.set_state(ReverseState(self))
         else:
             self.set_state(LiftState(self))
@@ -69,7 +72,7 @@ class PixelPumpStateMachine:
     def set_power_mode(self, power_mode):
         self.power_mode = power_mode
         self.settings_manager.set_power_mode(power_mode)
-        if self.power_mode is PowerMode.HIGH:
+        if self.power_mode == PowerMode.HIGH:
             self.high_button.set_color(Colors.BLUE, Brightness.DEFAULT)
             self.low_button.clear_color()
         else:
@@ -95,11 +98,11 @@ class PixelPumpStateMachine:
         self.high_duty = int(percentage * 2.55)
 
     def target_motor_pwm(self):
-        if self.power_mode is PowerMode.LOW:
+        if self.power_mode == PowerMode.LOW:
             return self.low_duty
-        elif self.power_mode is PowerMode.HIGH:
+        elif self.power_mode == PowerMode.HIGH:
             return self.high_duty
-        elif self.power_mode is PowerMode.MAX:
+        elif self.power_mode == PowerMode.MAX:
             return 255
 
     def tick(self, tick_ms):

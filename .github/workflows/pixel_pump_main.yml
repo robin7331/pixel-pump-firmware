@@ -6,25 +6,25 @@ on:
       - "v*"
 
 jobs:
-  dev-build:
+  release-build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         fetch-depth: 0
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         repository: micropython/micropython
-        ref: '294baf52b346e400e2255c6c1e82af5b978b18f7' # v1.20 tag
+        ref: 'v1.28.0'
         path: "./micropython"
+    - name: Check the source expectations still hold
+      run: python3 $GITHUB_WORKSPACE/tools/pump_check.py static
     - name: Update apt-get
       run: sudo apt-get update
     - name: Install packages
       run: sudo apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential cmake git python3 -y
-    - name: Apply HID fix
-      run: |
-        cd $GITHUB_WORKSPACE/micropython/
-        git apply -v --ignore-space-change --ignore-whitespace $GITHUB_WORKSPACE/drivers/rp2_hid/0001-shared-tinyusb-Add-USB-HID-support.patch
     - name: Generate Version File
       run: |
         python3 $GITHUB_WORKSPACE/tools/generateVersionFile.py --output $GITHUB_WORKSPACE/src/pixel_pump/version.py --repo $GITHUB_WORKSPACE
@@ -40,23 +40,31 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP BOARD_VARIANT=EMPTY
-        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware-blank.uf2
+        cp $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.uf2 $GITHUB_WORKSPACE/firmware-blank.uf2
     - name: Build Pixel Pump Firmware
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP clean
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP
-        mv $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware.uf2
-    - uses: marvinpinto/action-automatic-releases@latest
+        cp $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware.uf2
+    - name: Check firmware fits below the littlefs partition
+      run: |
+        $GITHUB_WORKSPACE/tools/checkFirmwareSize.sh \
+          $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.bin \
+          $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.bin
+    # Creates the DRAFT release publishing pixel_pump_publish.yml keys off.
+    # Same action and inputs as PP2's workflow of the same name — the previous
+    # marvinpinto/action-automatic-releases is archived upstream and declares
+    # node12, so it had not been exercised here since v1.0.1 in 2023.
+    - uses: softprops/action-gh-release@v2
       name: Release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
         prerelease: false
         draft: true
-        title: "Pixel Pump Release Build"
+        name: "Pixel Pump Release Build"
+        make_latest: "true"
         files: |
           firmware.uf2
           firmware-blank.uf2
-
-
-

@@ -2,7 +2,7 @@ import select
 import sys
 import machine
 
-from pixel_pump.enums import power_mode
+from pixel_pump.enums.power_mode import PowerMode
 from pixel_pump import version
 
 
@@ -19,20 +19,20 @@ class CommunicationManager:
         command = line.split(":")[0]
         arguments = line.split(":")[1:]
 
-        if command is "bootloader":
+        if command == "bootloader":
             from pixel_pump.states.bootloader_state import BootloaderState
             self.pixel_pump.set_state(BootloaderState(self.pixel_pump))
             return
-    
-        if command is "version":
+
+        if command == "version":
             self.parse_version_cmd(arguments)
             return
-        
-        if command is "reset":
+
+        if command == "reset":
             self.parse_reset_cmd(arguments)
             return
-        
-        if command is "settings":
+
+        if command == "settings":
             self.parse_settings_cmd(arguments)
             return
         
@@ -115,10 +115,10 @@ class CommunicationManager:
             
             target_mode = arguments[1]
             if target_mode == "high":
-                self.pixel_pump.set_power_mode(power_mode.HIGH)
+                self.pixel_pump.set_power_mode(PowerMode.HIGH)
                 return
             if target_mode == "low":
-                self.pixel_pump.set_power_mode(power_mode.LOW)
+                self.pixel_pump.set_power_mode(PowerMode.LOW)
                 return
                         
             return
@@ -151,6 +151,23 @@ class CommunicationManager:
             self.pixel_pump.high_duty = int(self.settings_manager.get_high_power_setting() * 2.55)
             return
         
+        if cmd == "set_keyboard_enabled":
+            if not self.check_valid_int_argument(arguments, 1):
+                return
+
+            # Deliberately does not reset, unlike settings:persist -- every
+            # other settings:set_* command leaves that to the host, which may
+            # want to write more than one key first. The keyboard interface is
+            # decided at enumeration, so this only shows up on the next boot.
+            enabled = int(arguments[1]) != 0
+            self.settings_manager.set_keyboard_enabled(enabled)
+            # The echo is required by docs/usb-communication.md, unlike every
+            # other settings:set_* command here: PP2 shares this command over a
+            # CDC line protocol that carries nothing else, so the reply is the
+            # host's only confirmation the value landed.
+            print("keyboard_enabled:" + ("1" if enabled else "0"))
+            return
+
         if cmd == "set_secondary_pedal_key":
             if not self.check_valid_hex_argument(arguments, 1):
                 return
@@ -192,8 +209,12 @@ class CommunicationManager:
             print("Missing argument")
             return False
 
+    # The three below want `<=`, not `<`: index is an index, so a list of
+    # length `index` stops one short of it. With `<`, a missing *final*
+    # argument slipped past the guard into the conversion, raising IndexError
+    # -- which `except ValueError` does not catch, so it escaped the parser.
     def check_valid_float_argument(self, arguments, index):
-        if len(arguments) < index:
+        if len(arguments) <= index:
             print("Missing argument")
             return False
         try:
@@ -204,7 +225,7 @@ class CommunicationManager:
             return False
         
     def check_valid_int_argument(self, arguments, index):
-        if len(arguments) < index:
+        if len(arguments) <= index:
             print("Missing argument")
             return False
         try:
@@ -215,7 +236,7 @@ class CommunicationManager:
             return False
         
     def check_valid_hex_argument(self, arguments, index):
-        if len(arguments) < index:
+        if len(arguments) <= index:
             print("Missing argument")
             return False
         try:
@@ -229,4 +250,16 @@ class CommunicationManager:
         # check if there is data on the USB port
         if self.poll_object.poll(0):
             line = sys.stdin.readline()
-            self.parse(line.strip())
+            # Nothing between here and the bare `while True:` in pixel_pump.py
+            # catches anything, so an exception raised while handling a command
+            # would not merely fail that command -- it would unwind out of the
+            # main loop and kill the firmware until power-cycle. With a daemon
+            # on the other end of this port that is not an acceptable failure
+            # mode for a malformed line.
+            #
+            # SystemExit derives from BaseException, so `reset:soft` still
+            # exits rather than being swallowed here.
+            try:
+                self.parse(line.strip())
+            except Exception as e:
+                print("Command failed: " + str(e))

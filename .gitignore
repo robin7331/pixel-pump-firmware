@@ -1,7 +1,8 @@
 /.vscode
 /pico-go.json
 /micropython
-/workflow
-.secrets
+/firmware.uf2
+/firmware-blank.uf2
 settings.json
 __pycache__
+.DS_Store

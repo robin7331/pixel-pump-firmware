@@ -5,17 +5,17 @@ import math
 from .button_event import ButtonEvent
 
 class Button:
-    def __init__(self, title, left_led_index, right_led_index, switch_pin, secondary_switch_pin=None, on_button_event=None, on_touch_down=None, on_touch_up=None, on_touch=None, on_long_press=None, on_should_render=None, lerp_speed=0.25):
+    def __init__(self, title, left_led_index, right_led_index, switch_pin, long_press_threshold=750, tapped_threshold=300, on_button_event=None, on_touch_down=None, on_touch_up=None, on_tapped=None, on_touch=None, on_long_press=None, on_should_render=None, lerp_speed=0.25):
         self.title = title
         self.pin = Pin(switch_pin, Pin.IN, Pin.PULL_DOWN)
-        self.secondary_pin = None
-        if secondary_switch_pin:
-            self.secondary_pin = Pin(secondary_switch_pin, Pin.IN, Pin.PULL_DOWN)
         self.left_led_index = left_led_index
         self.right_led_index = right_led_index
+        self.long_press_threshold = long_press_threshold
+        self.tapped_threshold = tapped_threshold
         self.on_button_event = on_button_event
         self.on_touch_down = on_touch_down
         self.on_touch_up = on_touch_up
+        self.on_tapped = on_tapped
         self.on_should_render = on_should_render
         self.on_long_press = on_long_press
         self.on_touch = on_touch
@@ -36,18 +36,23 @@ class Button:
 
     def tick(self):
 
-        state = False
-        if self.secondary_pin:
-            state = self.pin.value() or self.secondary_pin.value()
-        else:
-            state = self.pin.value()
+        state = self.pin.value()
 
-        if state and self.touch_start > 0 and (utime.ticks_ms()-self.touch_start) > 750:
+        if state and self.touch_start > 0 and (utime.ticks_ms()-self.touch_start) > self.long_press_threshold:
             self.touch_start = 0
             if self.on_long_press:
                 self.on_long_press(self)
             if self.on_button_event:
                 self.on_button_event(self, ButtonEvent.LONG_PRESS)
+
+        # Same thresholds and ordering as IOEventSource: a tap is a release
+        # after 50 ms and before tapped_threshold, and it precedes TOUCH_UP.
+        if not state and self.touch_start > 0 and (utime.ticks_ms()-self.touch_start) > 50 and (utime.ticks_ms()-self.touch_start) < self.tapped_threshold:
+            self.touch_start = 0
+            if self.on_tapped:
+                self.on_tapped(self)
+            if self.on_button_event:
+                self.on_button_event(self, ButtonEvent.TAPPED)
 
         if state != self.pressed:
             self.pressed = state
@@ -72,11 +77,11 @@ class Button:
 
         if self.pulsing:
             # Pulse to?
-            if self.pulseDirection is 1:
+            if self.pulseDirection == 1:
                 self.set_color(self.pulse_to_color, self.pulse_to_Brightness)
                 if self.is_color_set(source_color=self.pulse_to_color, source_brightness=self.pulse_to_Brightness):
                     self.pulseDirection = 2
-            elif self.pulseDirection is 2:
+            elif self.pulseDirection == 2:
                 self.set_color(self.pulse_from_color, self.pulse_from_brightness)
                 if self.is_color_set(source_color=self.pulse_from_color, source_brightness=self.pulse_from_brightness):
                     self.pulseDirection = 1

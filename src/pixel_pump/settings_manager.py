@@ -6,10 +6,18 @@ DEFAULT_SETTINGS = {
     "high_power_setting": 100,
     "power_mode": 1,
     "mode": 0,
+    # False drops the keyboard HID interface at enumeration, which is the only
+    # device-side way to stop macOS' Keyboard Setup Assistant appearing on first
+    # plug-in. Default True: the aux pedal sends keystrokes and that is shipped
+    # behaviour, so nobody loses it by upgrading.
+    "keyboard_enabled": True,
     "secondary_pedal_key": 0x11,
     "secondary_pedal_key_modifier": 0x00,
     "secondary_pedal_long_key": 0x52,
     "secondary_pedal_long_key_modifier": 0x00,
+    # Non-default mapping rows only, as [control, slot, gesture, action, param].
+    # Must be listed here or migrate_settings() would delete it on every boot.
+    "mappings": [],
 }
 
 
@@ -26,7 +34,9 @@ class SettingsManager:
                 self.settings = ujson.load(file)
         except OSError:  # open failed. Lets create one
             with open(self.file_name, "w") as file:
-                self.settings = DEFAULT_SETTINGS
+                # A copy, not the module dict itself -- "mappings" is mutable
+                # and aliasing it would let a device write reach the defaults.
+                self.settings = dict(DEFAULT_SETTINGS)
                 ujson.dump(self.settings, file)
 
     def migrate_settings(self):
@@ -34,12 +44,13 @@ class SettingsManager:
         for key in DEFAULT_SETTINGS:
             if key not in self.settings:
                 self.settings[key] = DEFAULT_SETTINGS[key]
-        
-        # remove obsolete settings
-        for key in self.settings:
+
+        # remove obsolete settings -- over a copy of the keys, since deleting
+        # from a dict while iterating it skips entries
+        for key in list(self.settings):
             if key not in DEFAULT_SETTINGS:
                 del self.settings[key]
-            
+
         self.persist_settings()
 
 
@@ -60,6 +71,9 @@ class SettingsManager:
                 ujson.dump(self.settings, file)
         except OSError:  # open failed. Lets create one
             print("error writing the settings")
+            return False
+
+        return True
 
     def set_property(self, property, value, persist):
         if property not in self.settings:
@@ -120,6 +134,15 @@ class SettingsManager:
     def set_mode(self, mode, persist=True):
         self.set_property("mode", mode, persist)
 
+    def get_keyboard_enabled(self):
+        # Coerced rather than returned raw: settings:persist lets a host write
+        # this key as 0/1 or true/false, and whether the pump enumerates a
+        # keyboard must not depend on which one it picked.
+        return bool(self.get_property("keyboard_enabled", default=True))
+
+    def set_keyboard_enabled(self, enabled, persist=True):
+        self.set_property("keyboard_enabled", bool(enabled), persist)
+
     # add methods to set and get the secondary_pedal_key which is a hex code as 0x11
     def set_secondary_pedal_key(self, key, persist=True):
         self.set_property("secondary_pedal_key", key, persist)
@@ -144,3 +167,14 @@ class SettingsManager:
 
     def get_secondary_pedal_long_key_modifier(self):
         return self.get_property("secondary_pedal_long_key_modifier", default=0x00)
+
+    def get_mappings(self):
+        return self.get_property("mappings", default=[])
+
+    def set_mappings(self, mappings, persist=True):
+        # Unconditional write, unlike set_property: COMMIT_MAPPINGS asks for a
+        # flash write and its ACK is the host's proof that one happened.
+        self.settings["mappings"] = mappings
+        if persist:
+            return self.persist_settings()
+        return True

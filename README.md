@@ -299,11 +299,11 @@ The workflows do exactly the above on an Ubuntu runner:
 
 | Workflow | Trigger | Result |
 |---|---|---|
-| `local.yml` | every push, any branch | builds and checks; produces nothing |
 | `pixel_pump_main.yml` | `v*` tag | draft release |
 | `pixel_pump_publish.yml` | publishing a release | pushes `firmware.uf2` to the website feed |
 
-The first two run `tools/pump_check.py static` before building. It needs no pump and no dependencies — it
+There is no CI before a tag — you build natively as you work, so the checks that matter run where
+you'd hit them first anyway. `pixel_pump_main.yml` runs `tools/pump_check.py static` before building. It needs no pump and no dependencies — it
 reads `src/` and fails if the default mapping table has drifted from what the hardware checks expect,
 so that turns up on a push rather than the next time someone plugs a pump in.
 

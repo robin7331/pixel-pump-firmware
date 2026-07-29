@@ -300,6 +300,33 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
 - **Factory reset:** LIFT + DROP held 3 s at power-on, checked before the boot sequence, resets the
   table and flashes the LEDs white. This is the only way back from a table that forwards every button.
 
+## Release distribution (issue #34)
+
+Publishing a draft release fires `pixel_pump_publish.yml`, which POSTs `firmware.uf2` to
+`robins-tools.com/downloads/pixel-pump-firmware/` — the feed Board Factory reads. The **README covers
+the mechanics** (§ CI); the wire contract lives in the website repo, and the CI-facing summary is
+board-factory's `docs/website-pixel-pump-firmware-endpoint.md`. What is not obvious from either:
+
+- **The workflow is a port of PP2's file of the same name, and the two should stay in step.** Only the
+  URL prefix, the token and the artifact filename differ. Fix a bug in one, carry it across — the same
+  standing arrangement as `protocol.py`, except this one PP1 does not receive from PP2 automatically.
+- **The token has a `ONE` the URL slug deliberately lacks.** Secret and Forge env var are
+  `PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN` (website services key `pixel_pump_one_firmware`), while the
+  line is `/downloads/pixel-pump-firmware/`. Not a typo: the slug matches this repo's name and froze the
+  moment anything shipped against it, whereas the ONE/TWO pairing is what stops the two lines' tokens
+  being confused. Anyone "fixing" either side breaks ingest with a 401 or a 404.
+- **Tags must be strict `vMAJOR.MINOR.PATCH`.** The device reports three bytes, so a prerelease suffix
+  cannot exist on the wire and must not reach the feed. This repo's history carries `latest`, `false`
+  and a malformed `v.0.0.4`; the job's `startsWith(tag, 'v')` condition skips the first two and the
+  semver check fails loudly on the third. `pixel_pump_dev.yml`'s rolling `latest` prerelease is
+  therefore safe to publish — it is a no-op, not a bad ingest.
+- **A `release: published` event runs the workflow file from the tag's commit, not from `main`.** So a
+  fix landed after a failed publish cannot re-run that publish; `workflow_dispatch` with the tag is the
+  recovery path, and it is why that trigger exists. By the same rule a tag cut before the workflow
+  existed can never publish at all.
+- **Re-running is safe.** Ingest is atomic and republish-is-replace, so a failed POST published nothing
+  and the previous release keeps serving.
+
 ## Notes
 
 - This is MicroPython — use `machine`, `rp2`, `utime`, `ujson`, not CPython equivalents. The CPython

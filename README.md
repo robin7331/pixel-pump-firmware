@@ -301,10 +301,18 @@ The workflows do exactly the above on an Ubuntu runner:
 |---|---|---|
 | `pixel_pump_dev.yml` | push / PR to `dev` | draft prerelease tagged `latest` |
 | `pixel_pump_main.yml` | `v*` tag | draft release |
+| `pixel_pump_publish.yml` | publishing a release | pushes `firmware.uf2` to the website feed |
 
-Both run `tools/pump_check.py static` before building. It needs no pump and no dependencies — it
+The first two run `tools/pump_check.py static` before building. It needs no pump and no dependencies — it
 reads `src/` and fails if the default mapping table has drifted from what the hardware checks expect,
 so that turns up on a push rather than the next time someone plugs a pump in.
+
+Releases are a two-step gesture, and the gate is yours: a `v*` tag builds and leaves a **draft**, so
+nothing is public until you review it and hit Publish. That click is what fires `pixel_pump_publish.yml`,
+which delivers `firmware.uf2` to `robins-tools.com/downloads/pixel-pump-firmware/` in one POST — the feed
+Board Factory reads to offer a firmware update. `firmware-blank.uf2` is a development image and stays on
+the GitHub release. Tag strictly as `vMAJOR.MINOR.PATCH`: the pump reports exactly three numbers over USB,
+so anything else is rejected rather than published.
 
 ## Project layout
 

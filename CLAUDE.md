@@ -325,9 +325,10 @@ board-factory's `docs/website-pixel-pump-firmware-endpoint.md`. What is not obvi
   PP2, which never had either. Nothing replaced that workflow, and nothing should: **there is no CI
   before a tag, by design.** `pixel_pump_main.yml` already runs both guards — `pump_check.py static`
   and `checkFirmwareSize.sh` — and it runs them before the draft release exists, which is the only
-  moment that matters. Builds are native here (README: "no Docker, no containers"), so the size check
-  is something you run locally as you go; PP2's act-based `local.yml` is a container path this repo
-  deliberately does not have. Beta/dev distribution was deferred, not designed away: the wire can
+  moment that matters. Builds are native in both repos (README: "no Docker, no containers"), so the
+  size check is something you run locally as you go — PP2 dropped its Act/Docker path the same day,
+  so neither repo has a container build to fall back on. Beta/dev distribution was deferred, not
+  designed away: the wire can
   already say "dev build" (`Flags.DEV_BUILD`) but not *which* dev build, since the three version bytes
   are the last tag. That is the real blocker, and it is firmware-side, not website-side.
 - **A `release: published` event runs the workflow file from the tag's commit, not from `main`.** So a

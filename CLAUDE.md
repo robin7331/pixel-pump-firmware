@@ -16,10 +16,11 @@ Two UF2s come out of every build:
 
 > ⚠️ **Branch `firmware-v2` carries issue #30 (`docs/plans/`), and the firmware work is done.**
 > Phases 0–6 have landed, both UF2s boot, and every acceptance item that this repo can close is
-> closed — all three wire checkers pass on the dev pump. Two items stay open by their nature, neither
+> closed — all four wire checkers pass on the dev pump. Two items stay open by their nature, neither
 > of them firmware: a side-by-side against a legacy unit (only one pump exists) and Board Factory
 > displaying the model (`board-factory#4` — the device already sends it correctly). Phase 7
-> (distribution) is deferred to its own issue. What remains is push, PR against `dev`, release.
+> (distribution) is deferred to its own issue. The branch is pushed; what remains is the PR against
+> `dev` and a release.
 > Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
 >
 > Phases 2, 3 and 4 are all verified on a physical pump (2026-07-28), wire checks included —
@@ -28,10 +29,15 @@ Two UF2s come out of every build:
 > reporting it, and `COMMIT_MAPPINGS` persistence has not been proven independently of the reset that
 > follows it. See the plan doc's Phase 4 gate.
 >
-> Issue #33 (`keyboard_enabled`) also landed on this branch, after the #30 gate closed. It builds and
-> fits, but **nothing about it is verified on hardware yet** — the acceptance items that matter are
-> the ones only a Mac can answer: `ioreg -c IOHIDDevice` showing no keyboard interface with it off,
-> and the Keyboard Setup Assistant staying away on a Mac that has never seen the pump.
+> Issue #33 (`keyboard_enabled`) also landed on this branch, after the #30 gate closed, and is
+> **verified on the dev pump as of 2026-07-29** — `tools/issue33_acceptance.py --auto` passes all four
+> of its unattended checks. `ioreg -c IOHIDDevice` shows no keyboard collection with the setting off,
+> which was the acceptance item; the vendor interface, the mapping table and CDC all survive without
+> it; and turning it back on restores the keyboard with the configured keys unchanged. Three items
+> stay open, none of them a firmware question: the Keyboard Setup Assistant staying away on a Mac that
+> has **never** enumerated this pump (the dialog is cache-driven, so the one Mac here cannot show it),
+> and checks D and F, which both want someone to tap the aux pedal. F is worth running — it is also
+> the only thing that would close the Phase 4 keystroke gap below.
 
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.28.0, async). Different
 > architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept
@@ -319,10 +325,14 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
   `issue33_acceptance.py` reboots the pump twice over CDC (`reset:hard`) and waits it back onto the
   bus itself, so it needs no hands for checks A/B/C/E; `--auto` skips the two that want a pedal tap.
 
-- **Any of them must be launched from Terminal** — macOS only opens a vendor HID interface for a
-  process holding Input Monitoring. But `exclusive access and device already open` has a second,
-  likelier cause that looks identical: **Board Factory's `pixel-pump-daemon` holds the interface**
-  whenever its dev app runs. Check `pgrep -fl pixel-pump-daemon` before touching System Settings.
+- If opening the vendor interface fails with `exclusive access and device already open`, the likely
+  cause is that **Board Factory's `pixel-pump-daemon` holds it** whenever its dev app runs. Check
+  `pgrep -fl pixel-pump-daemon` before touching System Settings — the message reads as a permissions
+  problem and usually is not one. Input Monitoring was thought to be a second cause, and this note
+  used to say the checkers had to be launched from Terminal; that is **no longer true** on this Mac.
+  On 2026-07-29 `hid.Device(path=...)` opened the `0xFF00` interface from an agent shell on the first
+  try and `issue33_acceptance.py` ran end to end from there, reboots included. Try the open before
+  assuming a permission wall.
 - `phase4_wire_check.py` reads `mode` back over CDC to judge whether a `FORWARD` button still acted
   locally. That question cannot be answered on the vendor interface — publish-all emits the EVENT
   frame either way.

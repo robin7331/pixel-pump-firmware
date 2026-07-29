@@ -3,7 +3,6 @@
 /micropython
 /firmware.uf2
 /firmware-blank.uf2
-/phase0_smoke.py
 settings.json
 __pycache__
 .DS_Store

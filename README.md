@@ -135,12 +135,34 @@ command parser directly.
 | `settings:set_power_mode:high\|low` | Switch power mode |
 | `settings:set_low_power_setting:<0-100>` | Low mode motor duty, in percent |
 | `settings:set_high_power_setting:<0-100>` | High mode motor duty, in percent |
+| `settings:set_keyboard_enabled:0\|1` | Register the HID keyboard interface, or don't (takes effect on the next boot) |
 | `settings:set_secondary_pedal_key:<hex>` | HID keycode sent when the second pedal is tapped |
 | `settings:set_secondary_pedal_key_modifier:<hex>` | Modifier for the above |
 | `settings:set_secondary_pedal_long_key:<hex>` | HID keycode for a long hold |
 | `settings:set_secondary_pedal_long_key_modifier:<hex>` | Modifier for the above |
 
 Keycodes are HID scancodes — see the [scancode table](https://deskthority.net/wiki/Scancode).
+
+### Turning the keyboard off
+
+The pump enumerates as a keyboard so the second foot pedal can type. If you don't use that pedal,
+macOS' Keyboard Setup Assistant popping up on a fresh machine is pure nuisance, and
+`settings:set_keyboard_enabled:0` is the way out — it stops the keyboard interface being registered
+at all, which is the only thing that reliably suppresses the dialog.
+
+It behaves a little differently from the other settings commands, in three ways worth knowing:
+
+- It **echoes** `keyboard_enabled:0` or `keyboard_enabled:1` back at you, normalised rather than
+  parroted, so any nonzero number reads back as `1`. No other `settings:set_*` answers.
+- It does **not** reboot the pump, unlike `settings:persist` and `settings:reset`. Nothing changes
+  until the next `reset:hard` or power cycle, so you can write several settings and reboot once.
+- Writing the whole settings dict back through `settings:persist` without the key **re-enables the
+  keyboard**, because the missing key gets filled in from the defaults. Worth remembering if the
+  interface reappears and you can't see why.
+
+Everything else survives with the keyboard off: the vendor interface, the mapping table and the
+serial port all work as normal, and the second pedal still reports its presses to a host — it just
+doesn't type.
 
 ## Talking to a host
 
@@ -163,19 +185,35 @@ while connected. Should you ever end up with a table that forwards everything an
 **hold Lift + Drop while powering on** for three seconds: the LEDs flash white and the table is back
 to defaults.
 
-Three checkers live in `tools/` for poking at this from a developer machine — controls and gestures,
-the mapping table, and the version/model/bootloader commands. All need the vendor interface, which
-macOS only hands to a process holding Input Monitoring, so run them from Terminal rather than an IDE,
-and quit Board Factory first (its daemon holds the interface exclusively):
+### Checking a pump
+
+`tools/pump_check.py` runs the whole thing against a real pump. It's one entry point over five
+groups, and with no arguments it runs them all in an order that leaves the pump usable:
 
 ```bash
-DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid python tools/phase3_wire_check.py
-DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/phase4_wire_check.py
-DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/phase6_acceptance.py
+DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/pump_check.py
 ```
 
-The last one ends by offering to reboot the pump into the bootloader, which is the only way to test
-that command for real. Say no and it skips it; say yes and a power cycle brings the pump back.
+| Group | What it checks |
+|---|---|
+| `static` | The checker's expectations still match the firmware source — needs no pump, and CI runs it |
+| `wire` | Control ids, the full gesture set, and the heartbeat's model id |
+| `mapping` | The mapping table: reads, writes, slots, flash persistence, factory reset |
+| `keyboard` | `keyboard_enabled` — enumeration with and without the keyboard interface |
+| `identity` | `GET_VERSION`, `GET_INFO`, and both `ENTER_BOOTLOADER` magics |
+
+Name groups to narrow it down (`pump_check.py mapping keyboard`), and pass `--auto` to skip
+everything that needs someone standing at the pump. `--list` prints the groups.
+
+Anything that can't be undone by itself asks first: the `identity` group offers to reboot the pump
+into the bootloader, which is the only way to test that command for real, and the `mapping` group
+offers the factory-reset gesture, which wants you to power-cycle the pump with two buttons held. Say
+no to either and it's skipped. The `keyboard` group reboots the pump a couple of times over the
+serial port, but waits it back onto the bus itself and restores the setting it found.
+
+If opening the vendor interface fails with *exclusive access and device already open*, the usual
+cause is Board Factory's daemon holding it — quit Board Factory, or check `pgrep -fl
+pixel-pump-daemon`. It reads like a permissions problem and generally isn't one.
 
 ## Building
 
@@ -264,6 +302,10 @@ The workflows do exactly the above on an Ubuntu runner:
 | `pixel_pump_dev.yml` | push / PR to `dev` | draft prerelease tagged `latest` |
 | `pixel_pump_main.yml` | `v*` tag | draft release |
 
+Both run `tools/pump_check.py static` before building. It needs no pump and no dependencies — it
+reads `src/` and fails if the default mapping table has drifted from what the hardware checks expect,
+so that turns up on a push rather than the next time someone plugs a pump in.
+
 ## Project layout
 
 ```
@@ -287,11 +329,13 @@ boards/PIXEL_PUMP/              MicroPython board definition, pin names and free
 docs/usb-communication.md       USB protocol spec (canonical copy lives in the Pixel Pump 2 repo)
 tools/generateVersionFile.py    Writes version.py from git metadata (runs in CI)
 tools/checkFirmwareSize.sh      Fails if an image would overrun the littlefs partition
-tools/phase*_wire_check.py      Interactive checks against a pump over USB (see below)
-tools/phase6_acceptance.py      Version, model and bootloader-command checks
+tools/pump_check.py             Runs the hardware checks (see Checking a pump, above)
+tools/pumpcheck/                Those checks, one module per feature area
 ```
 
-There's no test suite and no linter — testing is done by hand, on hardware.
+There's no test suite and no linter. Testing is done by hand, on hardware, with
+`tools/pump_check.py` — the exception being its `static` group, which reads `src/` rather than a pump
+and runs in CI on every build.
 
 ## Contributing
 

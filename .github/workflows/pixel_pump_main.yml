@@ -17,6 +17,8 @@ jobs:
         repository: micropython/micropython
         ref: 'v1.28.0'
         path: "./micropython"
+    - name: Check the source expectations still hold
+      run: python3 $GITHUB_WORKSPACE/tools/pump_check.py static
     - name: Update apt-get
       run: sudo apt-get update
     - name: Install packages

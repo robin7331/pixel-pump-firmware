@@ -14,108 +14,41 @@ Two UF2s come out of every build:
 - `firmware-blank.uf2` — MicroPython plus the USB stack, without `src/`. Flash this for development,
   then push `src/` over USB.
 
-> ⚠️ **Branch `firmware-v2` carries issue #30 (`docs/plans/`), and the firmware work is done.**
-> Phases 0–6 have landed, both UF2s boot, and every acceptance item that this repo can close is
-> closed — all four wire checkers pass on the dev pump. Two items stay open by their nature, neither
-> of them firmware: a side-by-side against a legacy unit (only one pump exists) and Board Factory
-> displaying the model (`board-factory#4` — the device already sends it correctly). Phase 7
-> (distribution) is deferred to its own issue. The branch is pushed; what remains is the PR against
-> `dev` and a release.
-> Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
->
-> Phases 2, 3 and 4 are verified on a physical pump, re-run end to end on 2026-07-29 against the build
-> that carries issue #33. **The Phase 4 gate is clean** — both narrow gaps it left are closed:
-> `COMMIT_MAPPINGS` persistence by `phase4_wire_check.py`'s check H, which reads `settings.json` over
-> CDC between the commit and the reset (and so also proves SET_MAPPING leaves flash alone), and the aux
-> pedal's keystroke by `issue33_acceptance.py`'s check F, which reads the keystroke off the terminal.
->
-> Issue #33 (`keyboard_enabled`) also landed on this branch, after the #30 gate closed, and is
-> **verified on the dev pump as of 2026-07-29** — all six of `tools/issue33_acceptance.py`'s checks
-> pass, pedal taps included. `ioreg -c IOHIDDevice` shows no keyboard collection with the setting off,
-> which was the acceptance item; the vendor interface, the mapping table and CDC all survive without
-> it; the aux pedal neither types nor wedges the firmware while it is off; and turning it back on
-> restores the keyboard with the configured keys unchanged. One item stays open and is not a firmware
-> question: the Keyboard Setup Assistant staying away on a Mac that has **never** enumerated this pump.
-> The dialog is cache-driven, so the one Mac here cannot show it whatever the firmware does.
-
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.28.0, async). Different
 > architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept
 > in sync rather than reinvented: `docs/usb-communication.md` (the USB protocol spec — canonical copy
-> lives in PP2, never edit this one independently) and `src/pixel_pump/usb/`, ported from PP2's
-> equivalent in Phase 2.
+> lives in PP2, never edit this one independently) and `src/pixel_pump/usb/`, ported from PP2.
 >
-> `src/pixel_pump/usb/protocol.py` is the exception to the exception: **protocol v2 was authored
-> here**, and is to be back-ported to PP2 verbatim (`pixel-pump-two-firmware#4`), after which PP2 owns
-> it. Keep the two copies byte-identical — that is why the model id lives in `usb_manager.py` and not
-> in `protocol.py`. `vendor_hid.py` also carries a host-activity bug fix that PP2 still needs; see the
-> plan doc's *Deviations*.
+> **PP2 owns `protocol.py`.** Protocol v2 was authored here and back-ported verbatim under
+> `pixel-pump-two-firmware#4`, which closed on 2026-07-29; the two copies are byte-identical today and
+> must stay that way, which is why the model id lives in `usb_manager.py` and not in `protocol.py`.
+> The `vendor_hid.tick()` fix below went across as `pixel-pump-two-firmware#5`, also closed. PP1 is
+> downstream of both now — change `protocol.py` in PP2 and re-sync, not the other way round.
 
-## Build & Development Commands
+## Docs & where facts live
 
-### Building firmware
+The README is the reference: building, flashing, mpremote, the serial command table, the project
+layout. It is written for a contributor and it is authoritative — **do not restate its content here.**
+This file holds what a contributor does not need and an agent does: conventions, invariants and the
+traps that have already cost someone a day.
 
-There is no local Makefile. Builds are the MicroPython rp2 port compiled against `boards/PIXEL_PUMP/`,
-natively — no Docker, no act. Needs `cmake` and Arm's toolchain (`brew install --cask gcc-arm-embedded`;
-the `arm-none-eabi-gcc` *formula* has no newlib and fails on a missing `nosys.specs`).
+Three of those are worth stating up front because they are cheap to trip and expensive to debug:
 
-**The checkout already exists at `./micropython`** — v1.28.0, submodules fetched, both variants built,
-~450 MB, ignored via `.gitignore`'s `/micropython`. Do not re-clone it; the disk runs close to full.
-The first two steps below are only for setting this up from scratch.
+- **Always run `tools/checkFirmwareSize.sh` after adding frozen code.** The 2 MB of flash is split
+  640 KiB firmware / 1408 KiB littlefs, but `memmap_mp_rp2040.ld` is handed the *whole* 2 MB — an
+  oversized image links silently and then overwrites the filesystem, `settings.json` included, on
+  first boot. The boundary cannot move without wiping every unit in the field, so this check is the
+  only guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 392,796 B full, ~59 % of
+  ceiling.
+- **The MicroPython checkout already exists at `./micropython`** — v1.28.0, submodules fetched, both
+  variants built, ~450 MB, ignored via `.gitignore`. Do not re-clone it; the disk runs close to full.
+- **`mpconfigvariant_EMPTY.cmake` must exist** or cmake hard-errors on `MICROPY_BOARD_VARIANT`. The
+  manifests decide what is frozen: `manifest_shared.py` is included by `manifest_empty.py` and by
+  `manifest.py`, which adds `src/`.
 
-```bash
-git clone --depth 1 --branch v1.28.0 https://github.com/micropython/micropython.git
-cd micropython
-make -C mpy-cross                 # needed to freeze src/
-make -C ports/rp2 submodules      # pico-sdk, tinyusb, micropython-lib
-
-export PP=/absolute/path/to/pixel-pump-firmware
-make -C ports/rp2 BOARD_DIR=$PP/boards/PIXEL_PUMP BOARD_VARIANT=EMPTY -j8   # firmware-blank.uf2
-make -C ports/rp2 BOARD_DIR=$PP/boards/PIXEL_PUMP -j8                       # firmware.uf2
-
-$PP/tools/checkFirmwareSize.sh \
-  ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.bin ports/rp2/build-PIXEL_PUMP/firmware.bin
-```
-
-Each variant has its own build directory — `build-PIXEL_PUMP-EMPTY/` and `build-PIXEL_PUMP/`. The
-manifests decide what is frozen: `manifest_shared.py` (port manifest + `usb-device`,
-`usb-device-hid`, `usb-device-keyboard`) is included by `manifest_empty.py` and by `manifest.py`,
-which adds `src/`. `mpconfigvariant_EMPTY.cmake` selects the empty one; it must exist or cmake
-hard-errors on `MICROPY_BOARD_VARIANT`.
-
-**Always run `tools/checkFirmwareSize.sh` after adding frozen code.** The 2 MB of flash is split
-640 KiB firmware / 1408 KiB littlefs, but `memmap_mp_rp2040.ld` is handed the *whole* 2 MB — an
-oversized image links silently and then overwrites the filesystem, `settings.json` included, on first
-boot. The boundary cannot move without wiping every unit in the field, so this check is the only
-guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 392,796 B full, ~59 % of ceiling.
-
-| Workflow | Job | Trigger | Release |
-|----------|-----|---------|---------|
-| `pixel_pump_dev.yml` | `dev-build` | push/PR to `dev` | draft prerelease, tag `latest` |
-| `pixel_pump_main.yml` | `dev-build` | `v*` tags | draft release |
-
-Both define a job named `dev-build`. The artifact paths matter: the blank build lands in
-`build-PIXEL_PUMP-EMPTY/`, not `build-PIXEL_PUMP/`.
-
-### Remote development on MCU
-
-Flash `firmware-blank.uf2` first, then use mpremote (the old `tools/copy_files.py`,
-`list_files.py`, `remove_files.py` scripts were removed in `d512b36` — mpremote replaced them):
-
-```bash
-uv tool install mpremote  # if not installed
-
-# Add to ~/.config/mpremote/config.py:
-# commands = { "debug": ["mount", "./src", "exec", "import main"] }
-
-mpremote debug  # mounts local src/ on MCU and executes main
-```
-
-### Entering the bootloader
-
-- Running pump: long-press **Lift** (→ brightness settings), then long-press **Drop**.
-- Over serial: send `bootloader`.
-- Dead pump: hold the recessed bootloader switch (rear hole on the left side, see
-  `media/bootloader-switch-location.png`) while powering on.
+Plans live in `docs/plans/` only while they are in flight. Once the work lands, the plan is deleted
+and anything still load-bearing moves here — a finished plan is archaeology, and a stale one is
+worse than none. Issue #30's plan was deleted on 2026-07-29 for exactly that reason.
 
 ## Architecture
 
@@ -177,7 +110,8 @@ Conventions worth preserving:
   target colour at 30 FPS, supports `pulsate()` ping-pong animation. Emits TOUCH_DOWN, TOUCH_UP,
   TOUCH, TAPPED (50–300 ms) and LONG_PRESS (>750 ms) — the same gesture set and thresholds as
   `IOEventSource`, and on a quick release TAPPED precedes TOUCH_UP. One button drives exactly one
-  pin; the `secondary_switch_pin` OR went away with the trigger/pedal split in Phase 3.
+  pin; the `secondary_switch_pin` OR went away when the trigger and the pedal became separate
+  controls.
 - **`IOEventSource`** (`controls/io_event_source.py`): raw GPIO → events (ACTIVATE, DEACTIVATE, HOLD,
   TAPPED 50–300 ms, LONG_HOLD >750 ms). Used for both pedals — `foot_pedal` (GPIO6) and
   `secondary_pedal` (GPIO7).
@@ -238,24 +172,9 @@ LED index → button: Lift 0/1, Drop 2/3, Low 4/5, High 6/7, Reverse 8/9, Trigge
 
 ## Serial Command Protocol
 
-`CommunicationManager` reads newline-terminated, colon-separated commands from USB stdin:
-
-```
-bootloader
-version:info                                  → tag,branch,commit_hash,timestamp
-reset:soft | reset:hard
-settings:dump                                 → full JSON
-settings:persist:<json>                        (then hard reset)
-settings:reset                                 (then hard reset)
-settings:set_brightness:<float>
-settings:set_mode:lift|drop|reverse
-settings:set_power_mode:high|low
-settings:set_low_power_setting:<0-100>
-settings:set_high_power_setting:<0-100>
-settings:set_keyboard_enabled:0|1             → keyboard_enabled:0|1  (next boot)
-settings:set_secondary_pedal_key[_modifier]:<hex>
-settings:set_secondary_pedal_long_key[_modifier]:<hex>
-```
+`CommunicationManager` reads newline-terminated, colon-separated commands from USB stdin. **The full
+command table is in the README** (§ Serial commands); what follows is only what is not obvious from
+reading it.
 
 `settings:persist` re-joins arguments on `:` so JSON payloads survive the split.
 
@@ -303,43 +222,43 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
   settings manager); until then the four mapping commands answer `ERROR UNKNOWN_COMMAND`.
 - `ENTER_BOOTLOADER` requires magic `0xB007`, `RESET_MAPPINGS` requires `0xDEFA`. A wrong magic is
   `ERROR BAD_MAGIC` and must never reboot the pump mid-assembly.
-- To watch the wire, four interactive checkers live in `tools/` — `phase3_wire_check.py` (control ids,
-  gestures, heartbeat model), `phase4_wire_check.py` (the mapping commands, slot switching,
-  remote-mode LED, factory reset, and check H's flash-persistence proof),
-  `phase6_acceptance.py` (`GET_VERSION` cross-checked against the
-  heartbeat and CDC, `GET_INFO`, and both `ENTER_BOOTLOADER` magics) and `issue33_acceptance.py`
-  (`keyboard_enabled` — the CDC echo, the keyboard collection's absence per both `hid.enumerate()` and
-  `ioreg`, and that everything else survives without it). PP2's `tools/usb-coms` gives a raw frame
-  dump. `phase6_acceptance.py` and `issue33_acceptance.py` import their transport from
-  `phase4_wire_check.py` rather than duplicating it, so `Session`, `ModeProbe`, `expect_error` and the
-  daemon warning are shared — keep those files import-safe (everything behind
-  `if __name__ == "__main__"`).
+- **`vendor_hid.tick()`'s open edge used to discard a host frame that had already arrived.** The
+  branch cleared `_last_host_rx_ms` unconditionally, so a frame landing between the interface opening
+  and the next `tick()` was thrown away and the device stayed inactive until the host's *next*
+  heartbeat (~400 ms with the daemon) — which a daemon that opens and immediately writes hits on every
+  connect. The close edge already clears that state, so the reset was redundant as well as lossy.
+  Fixed here, and taken by PP2 as `pixel-pump-two-firmware#5`.
+- To watch the wire, `tools/pump_check.py` is the single entry point; see the README (§ Talking to a
+  host) for how to run it and what the groups cover. PP2's `tools/usb-coms` gives a raw frame dump.
+  Two things about it matter when changing firmware rather than running it:
+  - **It shares the firmware's protocol vocabulary rather than copying it.** `pumpcheck/firmware.py`
+    imports `src/pixel_pump/usb/protocol.py` directly — that file carries a CPython shim for
+    `micropython.const` and imports nothing else, which is what makes it host-importable. Keep it that
+    way: adding an import to `protocol.py` breaks every check at once.
+  - **Two firmware facts it cannot import are guarded automatically.** `pumpcheck/checks_static.py`
+    holds an independent `EXPECTED_DEFAULTS` and diffs it against `mapping.py`'s `DEFAULTS`, parsed
+    with `ast` (`mapping.py` itself cannot be imported — it pulls in `utime`), and cross-checks its
+    `VID`/`PID` against `boards/PIXEL_PUMP/mpconfigboard.h`. Change either and CI fails with both
+    sides named. The `DEFAULTS` copy is deliberate: importing it would make the hardware checks
+    tautological, proving only that the device agrees with its own source.
 
-  ```bash
-  DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid python tools/phase3_wire_check.py
-  DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/phase4_wire_check.py
-  DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/phase6_acceptance.py
-  DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial python tools/issue33_acceptance.py
-  ```
-
-  `issue33_acceptance.py` reboots the pump twice over CDC (`reset:hard`) and waits it back onto the
-  bus itself, so it needs no hands for checks A/B/C/E; `--auto` skips the two that want a pedal tap.
-
+  Everything else is manual. A new control, gesture, command or settings key wants a matching check in
+  the group that owns it — `wire`, `mapping`, `identity` or `keyboard`.
 - If opening the vendor interface fails with `exclusive access and device already open`, the likely
   cause is that **Board Factory's `pixel-pump-daemon` holds it** whenever its dev app runs. Check
   `pgrep -fl pixel-pump-daemon` before touching System Settings — the message reads as a permissions
   problem and usually is not one. Input Monitoring was thought to be a second cause, and this note
   used to say the checkers had to be launched from Terminal; that is **no longer true** on this Mac.
   On 2026-07-29 `hid.Device(path=...)` opened the `0xFF00` interface from an agent shell on the first
-  try and `issue33_acceptance.py` ran end to end from there, reboots included. Try the open before
+  try and a full acceptance run went end to end from there, reboots included. Try the open before
   assuming a permission wall.
-- `phase4_wire_check.py` reads `mode` back over CDC to judge whether a `FORWARD` button still acted
+- The `mapping` group reads `mode` back over CDC to judge whether a `FORWARD` button still acted
   locally. That question cannot be answered on the vendor interface — publish-all emits the EVENT
   frame either way.
 - **A blocking prompt is a disconnection.** The device drops to STANDALONE 1200 ms after the last host
   write, so any `input()` in a checker times the host out mid-question, and the answer then describes
   a standalone pump. This cost a full round of false failures that read convincingly like mapping-engine
-  bugs. `phase4_wire_check.py` beats the heartbeat on a background thread and waits for EVENT frames
+  bugs. `Session.start_keepalive()` beats on a background thread, and the checks wait for EVENT frames
   instead of Enter; do the same in anything new. A press with no EVENT frame means the host was
   inactive — report that as inconclusive, never as a failed mapping.
 
@@ -365,8 +284,16 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
   `DEFAULT_SETTINGS` or `migrate_settings()` deletes it every boot. Corrupt rows are skipped, not
   fatal.
 - **Settings menus suspend the engine** (`State.suspends_mapping`); `pixel_pump.py`'s
-  `_legacy_button_dispatch` handles buttons the legacy way until the menu exits. Pedals are not
-  suspended — see the plan doc's Phase 4 deviations.
+  `_legacy_button_dispatch` handles buttons the legacy way until the menu exits. **Suspension covers
+  buttons only, not the pedals** — deliberately. The spec says "the legacy in-menu **button** behavior
+  applies", and under the default table the two readings are indistinguishable anyway
+  (`FPEDAL HELD → PUMP_TRIGGER` calls the same `trigger_on/off` intents the menu commits on). Letting
+  a *remapped* pedal keep its host mapping inside a menu is the more defensible of the two.
+  Both paths share the HELD bookkeeping via `MappingEngine.hold_pump()`, and that is not optional: if
+  the trigger button is held inside a menu and the menu exits some *other* way — Reverse cancels it,
+  or the 60 s motor timeout drops it — the release arrives on the mapping path, which without the
+  recorded press never drops the pump holder. The refcount then sits at 1 forever, silently killing
+  the foot pedal until power-cycle.
 - **Remote-mode LED:** purple at `Brightness.DIMMER` on buttons whose active-slot gestures are all
   `FORWARD`/`NONE`. Applied on transition, snapshotting and restoring the button's colour and pulsate
   state; it deliberately does not fight the state machine afterwards.
@@ -375,25 +302,28 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
 
 ## Notes
 
-- This is MicroPython — use `machine`, `rp2`, `utime`, `ujson`, not CPython equivalents. The only
-  CPython files in the repo are the five under `tools/`: `generateVersionFile.py`, which runs on the
-  CI host, and `phase3_wire_check.py`, `phase4_wire_check.py`, `phase6_acceptance.py` and
-  `issue33_acceptance.py`, which run on a developer's machine.
-- No test framework, no linter, no formatter. Testing is manual, on hardware.
+- This is MicroPython — use `machine`, `rp2`, `utime`, `ujson`, not CPython equivalents. The CPython
+  in the repo is `tools/`: `generateVersionFile.py`, which runs on the CI host, and `pump_check.py`
+  plus the `pumpcheck/` package, which run on a developer's machine. `src/pixel_pump/usb/protocol.py`
+  is the one file that must import cleanly under **both**, which is what its `const` shim is for.
+- No test framework, no linter, no formatter. The only automated check is
+  `tools/pump_check.py static`, which CI runs before the build; everything else is manual, on hardware.
 - USB identity: VID `0x2E8A`, PID `0x1061`, "Robins Tools" / "Pixel Pump" (`boards/PIXEL_PUMP/mpconfigboard.h`).
   `0x2E8A` is Raspberry Pi's vendor ID; `0x1061` is the product ID they assigned for the Pixel Pump 1
-  and **must not change** — hosts already in the field discover the pump by it. PP2 moves to `0x1062`
-  so the two are distinguishable at enumeration; until then both share `0x1061` and a host cannot tell
-  them apart before opening the vendor interface. `0x1062` is registered with Raspberry Pi
-  (raspberrypi/usb-pid#44).
+  and **must not change** — hosts already in the field discover the pump by it. PP2 has moved to
+  `0x1062` (registered as raspberrypi/usb-pid#44), so the two models are now distinguishable at
+  enumeration, before any interface is opened. Distinct PIDs do not make `MODEL_ID` redundant: the PID
+  identifies the product to the OS, while `MODEL_ID` in the heartbeat tells the daemon which protocol
+  dialect and mapping table apply. A daemon should treat a `MODEL_ID` that disagrees with the PID as
+  an error.
 - The CPU is deliberately underclocked to 96 MHz, and QSPI pads are set to 2 mA / slow slew in
   `pixel_pump.py` — both are EMI/noise measures. The large register-address constant block at the top
   of that file is mostly unused; only `SetPadQSPI` reads from it.
 - `usb_hid` is **gone**. It only ever existed via the patch in `drivers/rp2_hid/`, which the build
-  stopped applying in Phase 0; the directory itself was deleted in Phase 1. USB is now runtime-
+  stopped applying, and the directory itself is gone. USB is now runtime-
   configured through micropython-lib's `usb.device` (frozen into both images), so HID work goes
   through `usb.device.hid` / `usb.device.keyboard`, not `import usb_hid`. The old
-  `src/pixel_pump/keyboard.py` went with it in Phase 2 — the replacement is `usb/keyboard.py`.
+  `src/pixel_pump/keyboard.py` went with it — the replacement is `usb/keyboard.py`.
 - **Modifiers are encoded differently on each side of `usb/keyboard.py`.** `settings.json` stores raw
   HID usages (`0xE0`–`0xE7`, `0x00` = none), while micropython-lib's `send_keys` wants modifiers as
   *negative* values (`r[0] |= -k`), i.e. `0xE0 + n → -(1 << n)`. The wrapper translates; anything
@@ -417,16 +347,16 @@ Pre-existing, and useful to know before touching the surrounding code:
 - Timing uses plain `utime.ticks_ms()` subtraction rather than `utime.ticks_diff()`, so it breaks at
   the ~12.4-day wraparound. Consistent across the codebase; match the surrounding style unless you're
   deliberately fixing it. New USB code uses `ticks_diff` as ported from PP2 — the two conventions
-  coexist on purpose, and Phase 5 deliberately left the legacy side alone.
+  coexist on purpose: the legacy side was deliberately left alone.
 - Every `settings:set_*` command reports a missing argument as `Missing argument` and a malformed one
   as `Invalid argument`, and neither disturbs the stored value. Confirmed on hardware 2026-07-28.
   Keep it that way: these are the answers a host parses.
-- Comparisons are `==` on values and `is` only on objects, as of Phase 5. The surviving `is` compare
+- Comparisons are `==` on values and `is` only on objects. The surviving `is` compare
   `Button` *instances* (`btn is self.device.low_button`) and are correct as identity. Don't
   reintroduce `is` against ints, strings or enum constants: it happened to work for small ints and
   interned strings, but nothing guarantees it.
 
-Fixed in Phase 5, listed because the symptoms are worth recognising if they resurface:
+Already fixed, listed because the symptoms are worth recognising if they resurface:
 
 - `CommunicationManager.parse()` used to dispatch commands with `is` on strings built by
   `line.split(":")`. It worked only because MicroPython interns short identifiers.

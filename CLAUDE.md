@@ -307,9 +307,21 @@ Publishing a draft release fires `pixel_pump_publish.yml`, which POSTs `firmware
 the mechanics** (§ CI); the wire contract lives in the website repo, and the CI-facing summary is
 board-factory's `docs/website-pixel-pump-firmware-endpoint.md`. What is not obvious from either:
 
-- **The workflow is a port of PP2's file of the same name, and the two should stay in step.** Only the
-  URL prefix, the token and the artifact filename differ. Fix a bug in one, carry it across — the same
-  standing arrangement as `protocol.py`, except this one PP1 does not receive from PP2 automatically.
+- **Both workflows are ports of PP2's files of the same name, and the two repos should stay in step.**
+  In `pixel_pump_publish.yml` only the URL prefix, the token and the artifact filename differ. Fix a
+  bug in one, carry it across — the same standing arrangement as `protocol.py`, except this one PP1
+  does not receive from PP2 automatically. `pixel_pump_main.yml` diverges more (PP1 runs
+  `pump_check.py static`, PP2 does not), but as of 2026-07-29 its **release step is the same action in
+  both**, so that half travels too.
+- **The draft-creating action was `marvinpinto/action-automatic-releases@latest` until 2026-07-29.**
+  It is archived upstream and its `action.yml` still declares `node12`, while runners now force even
+  node20 actions onto node24. It had not run here since v1.0.1 in 2023, so the first tag of the
+  rewritten firmware would have been its first exercise on a modern runner — and a failure there costs
+  the whole five-minute build and leaves no draft for `pixel_pump_publish.yml` to key off. Replaced by
+  PP2's `softprops/action-gh-release@v2` (`title:` becomes `name:`, the token moves from a `repo_token`
+  input to the `GITHUB_TOKEN` env var). The job carries an explicit `permissions: contents: write`
+  rather than leaning on the repo-wide default — that default is `write` in PP1 and `read` in PP2, and
+  the explicit block is what lets the same file work in either.
 - **The token has a `ONE` the URL slug deliberately lacks.** Secret and Forge env var are
   `PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN` (website services key `pixel_pump_one_firmware`), while the
   line is `/downloads/pixel-pump-firmware/`. Not a typo: the slug matches this repo's name and froze the
@@ -337,6 +349,13 @@ board-factory's `docs/website-pixel-pump-firmware-endpoint.md`. What is not obvi
   existed can never publish at all.
 - **Re-running is safe.** Ingest is atomic and republish-is-replace, so a failed POST published nothing
   and the previous release keeps serving.
+- **The path is proven end to end, on 2026-07-29 with `v2.0.0`** — tag → build → draft → publish →
+  POST → feed, with the UF2 the website serves verified byte-identical to the GitHub release asset.
+  That run is also the first thing to exercise `PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN` against Forge,
+  and it is worth knowing why nothing earlier could: an unauthenticated POST to the ingest URL answers
+  401, but so does an authenticated one when the *server* side is unset, because
+  `AuthenticateReleaseIngest` rejects a missing configured token identically. A 401 proves the route is
+  deployed and nothing about whether the two token values agree.
 
 ## Notes
 

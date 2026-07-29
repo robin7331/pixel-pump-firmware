@@ -12,7 +12,8 @@ Two objects live here:
   the contract spelled out in that class' docstring, and owns persistence.
 - ``MappingEngine`` is the local half. It turns control events into
   state-machine intents, owns the pump refcount and paints the remote-mode
-  LEDs.
+  LEDs -- including the per-control appearance a host declares in FORWARD's
+  param (spec §Control appearance; ``decode_appearance`` below).
 """
 
 import utime
@@ -53,6 +54,28 @@ class Action:
     BRIGHTNESS_MENU = const(0x25)
     POWER_SETTINGS_LOW = const(0x26)
     POWER_SETTINGS_HIGH = const(0x27)
+
+
+class Color:
+    """FORWARD's appearance param, low nibble -- see ``decode_appearance``."""
+
+    REMOTE_DEFAULT = const(0x0)
+    BLUE = const(0x1)
+    RED = const(0x2)
+    GREEN = const(0x3)
+    WHITE = const(0x4)
+    AMBER = const(0x5)
+    CYAN = const(0x6)
+    OFF = const(0x7)
+
+
+class Animation:
+    """The same param's high nibble. SPIN and RAINBOW are ring-only (PP2)."""
+
+    SOLID = const(0x0)
+    PULSE = const(0x1)
+    SPIN = const(0x2)
+    RAINBOW = const(0x3)
 
 
 # SEND_KEY carries no modifier byte by design, but PP1's stdin protocol
@@ -124,8 +147,45 @@ VENT_PULSE_DEFAULT_MS = const(500)
 
 REMOTE_COLOR = Colors.PURPLE
 REMOTE_BRIGHTNESS = Brightness.DIMMER
+# The dim end of a PULSE breath. Same hue, lower alpha, so it reads as
+# breathing rather than blinking.
+REMOTE_PULSE_BRIGHTNESS = 0.02
+
+# The appearance palette: the param's low nibble indexed into PP1's colours.
+# OFF is absent -- it means "show nothing", which is a dark button, not a
+# colour. REMOTE_DEFAULT is the classic purple remote badge.
+APPEARANCE_COLORS = {
+    Color.REMOTE_DEFAULT: REMOTE_COLOR,
+    Color.BLUE: Colors.BLUE,
+    Color.RED: Colors.RED,
+    Color.GREEN: Colors.GREEN,
+    Color.WHITE: Colors.WHITE,
+    Color.AMBER: Colors.AMBER,
+    Color.CYAN: Colors.CYAN,
+}
+
+# A control's appearance is the first non-zero param among its FORWARD cells
+# scanned in *gesture-id* order, which is not the order GESTURES lists them in.
+APPEARANCE_SCAN = (Gesture.TAP, Gesture.LONG_HOLD, Gesture.HELD, Gesture.PRESS)
 
 FACTORY_RESET_HOLD_MS = const(3000)
+
+
+def decode_appearance(param):
+    """``(animation, color)`` from a FORWARD param, degraded to what PP1 shows.
+
+    Reserved and unsupported values render as the nearest supported thing and
+    never error -- that is what lets the appearance catalog grow past this
+    firmware. PP1 has no ring, so SPIN and RAINBOW arrive here and leave as
+    SOLID.
+    """
+    animation = (param >> 4) & 0x0F
+    color = param & 0x0F
+    if animation != Animation.PULSE:
+        animation = Animation.SOLID
+    if color not in APPEARANCE_COLORS and color != Color.OFF:
+        color = Color.REMOTE_DEFAULT
+    return (animation, color)
 
 
 class MappingTable:
@@ -155,6 +215,9 @@ class MappingTable:
     def is_valid_action(self, control_id, gesture, action, param):
         if action not in ACTIONS:
             return False
+        # FORWARD's param is the control appearance (decode_appearance) and is
+        # deliberately not validated: reserved values degrade at render time,
+        # never error, so the appearance catalog can outgrow this firmware.
         # PUMP_TRIGGER is momentary -- it needs a release edge to stop the
         # vacuum, so HELD is the only gesture that can carry it.
         if action == Action.PUMP_TRIGGER and gesture != Gesture.HELD:
@@ -424,39 +487,78 @@ class MappingEngine:
     def _apply_remote_leds(self, slot):
         for control_id in self.buttons:
             button = self.buttons[control_id]
-            remote = self._is_remote(control_id, slot)
+            appearance = self._remote_appearance(control_id, slot)
+            current = self._remote_leds.get(control_id, None)
 
-            if remote and control_id not in self._remote_leds:
-                self._remote_leds[control_id] = (
-                    button.left_target_color,
-                    button.pulsing,
-                    button.pulse_from_color,
-                    button.pulse_from_brightness,
-                    button.pulse_to_color,
-                    button.pulse_to_Brightness,
-                )
-                button.stop_pulsating()
-                button.set_color(REMOTE_COLOR, REMOTE_BRIGHTNESS)
-            elif not remote and control_id in self._remote_leds:
-                target, pulsing, from_c, from_b, to_c, to_b = self._remote_leds.pop(
-                    control_id
-                )
-                button.set_color((target[0], target[1], target[2]), target[3])
-                if pulsing:
-                    button.pulsate(from_c, from_b, to_c, to_b)
+            if appearance is None:
+                if current is not None:
+                    del self._remote_leds[control_id]
+                    self._restore_button(button, current[1])
+            elif current is None:
+                self._remote_leds[control_id] = (appearance, self._snapshot(button))
+                self._render_appearance(button, appearance)
+            elif appearance != current[0]:
+                # A host recoloured a button that is already remote. Repaint,
+                # but keep the *original* snapshot -- restoring the purple
+                # badge on the way out would strand the state machine's colour.
+                self._remote_leds[control_id] = (appearance, current[1])
+                self._render_appearance(button, appearance)
 
-    def _is_remote(self, control_id, slot):
-        # "Remote" means the host owns the button: something on it forwards and
-        # nothing on it still acts locally. A button that keeps e.g. its
-        # long-press menu is not remote, and showing the colour would lie.
+    def _remote_appearance(self, control_id, slot):
+        """The button's appearance in ``slot``, or None if it is not remote.
+
+        "Remote" means the host owns the button: something on it forwards and
+        nothing on it still acts locally. A button that keeps e.g. its
+        long-press menu is not remote, and badging it would lie.
+
+        The appearance is the first non-zero param among the FORWARD cells,
+        scanned in gesture-id order. Zero means "no preference", so an
+        implicit FORWARD never masks one a host wrote an appearance into.
+        """
         forwards = False
-        for gesture in GESTURES:
-            action = self.table.get_raw(control_id, gesture, slot)[0]
+        param = 0
+        for gesture in APPEARANCE_SCAN:
+            action, cell_param = self.table.get_raw(control_id, gesture, slot)
             if action == Action.FORWARD:
                 forwards = True
+                if param == 0:
+                    param = cell_param
             elif action != Action.NONE:
-                return False
-        return forwards
+                return None
+        if not forwards:
+            return None
+        return decode_appearance(param)
+
+    def _render_appearance(self, button, appearance):
+        # Brightness stays device-owned: the host picks colour and animation,
+        # and the user's global brightness setting still multiplies on top.
+        animation, color = appearance
+        button.stop_pulsating()
+        if color == Color.OFF:
+            button.clear_color()
+            return
+        rgb = APPEARANCE_COLORS[color]
+        if animation == Animation.PULSE:
+            button.pulsate(rgb, REMOTE_PULSE_BRIGHTNESS, rgb, REMOTE_BRIGHTNESS)
+        else:
+            button.set_color(rgb, REMOTE_BRIGHTNESS)
+
+    def _snapshot(self, button):
+        return (
+            button.left_target_color,
+            button.pulsing,
+            button.pulse_from_color,
+            button.pulse_from_brightness,
+            button.pulse_to_color,
+            button.pulse_to_Brightness,
+        )
+
+    def _restore_button(self, button, snapshot):
+        target, pulsing, from_c, from_b, to_c, to_b = snapshot
+        button.stop_pulsating()
+        button.set_color((target[0], target[1], target[2]), target[3])
+        if pulsing:
+            button.pulsate(from_c, from_b, to_c, to_b)
 
 
 def check_factory_reset(table, renderer, pins, hold_ms=FACTORY_RESET_HOLD_MS):

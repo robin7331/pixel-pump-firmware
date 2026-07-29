@@ -13,8 +13,8 @@ is closed, and all future control features are host-side intents.
 
 | Codebase | Status | Tracking |
 |---|---|---|
-| Pixel Pump 2 firmware (this repo) | v2 implemented and hardware-verified (2026-07-28); unreleased — the PID split must not ship before hosts discover on both PIDs | robin7331/pixel-pump-two-firmware#4 |
-| Pixel Pump 1 firmware | v2 implemented on `firmware-v2` (issue #30 complete); shipping units remain legacy (no vendor HID at all — stdin line protocol only) | robin7331/pixel-pump-firmware#30 |
+| Pixel Pump 2 firmware (this repo) | v2 implemented and hardware-verified (2026-07-28); unreleased — the PID split must not ship before hosts discover on both PIDs. Appearance addendum implemented, not yet bench-verified | robin7331/pixel-pump-two-firmware#4, #7 |
+| Pixel Pump 1 firmware | v2 released as v2.0.0 (2026-07-29) from `main` and served by the update feed (issue #30 complete); units in the field run legacy v1 (no vendor HID at all — stdin line protocol only) until they are updated. Appearance addendum implemented, not yet bench-verified | robin7331/pixel-pump-firmware#30, #35 |
 | Board Factory daemon (`board-factory/rust/pixel-pump-daemon`) | v1 implemented; v2 + multi-PID discovery not started | robin7331/board-factory#4 |
 
 Sections that only exist in v2 are marked **[v2]**. Everything else shipped
@@ -329,7 +329,7 @@ model/gesture → `ERROR BAD_ACTION`.
 | ID | Name | Devices | Param | Meaning |
 |---|---|---|---|---|
 | `0x00` | `NONE` | both | — | do nothing |
-| `0x01` | `FORWARD` | both | — | no local action (host intent handles it) |
+| `0x01` | `FORWARD` | both | `(animation << 4) \| color` — the control's appearance (see §Control appearance) | no local action (host intent handles it) |
 | `0x02` | `SEND_KEY` | both | HID keycode | keyboard emulation. TAP: tap key. HELD: press/release with control. DELTA: one tap per detent |
 | `0x10` | `PUMP_TRIGGER` | both | — | HELD: run vacuum while active (device-appropriate choreography: PP2 motor+vent, PP1 state-machine `trigger_on/off`) |
 | `0x11` | `PUMP_TOGGLE` | both | — | TAP: toggle pump run state |
@@ -347,6 +347,91 @@ While a PP1 settings state (brightness / power adjustment) is active, the
 legacy in-menu button behavior applies and the mapping engine is suspended
 until the menu exits.
 
+### [v2] Control appearance (`FORWARD`'s param)
+
+`FORWARD`'s param byte declares the control's **appearance** — how the device
+lights a host-owned control. Nibble-packed, the same trick byte 5 of the
+mapping commands already uses for slot and gesture:
+
+    param = (animation << 4) | color
+
+The appearance is declared at mapping time and persisted with the table like
+any other param; the device owns rendering, timing, brightness and the
+STANDALONE fallback. There is no live LED channel (see §Non-goals).
+
+Colors (low nibble):
+
+| Value | Name | Note |
+|---|---|---|
+| `0x0` | `REMOTE_DEFAULT` | the device's classic remote rendering — prior behavior |
+| `0x1` | `BLUE` | |
+| `0x2` | `RED` | |
+| `0x3` | `GREEN` | |
+| `0x4` | `WHITE` | |
+| `0x5` | `AMBER` | |
+| `0x6` | `CYAN` | |
+| `0x7` | `OFF` | host owns the control, device shows nothing |
+| `0x8`–`0xF` | reserved | render as `REMOTE_DEFAULT` |
+
+Animations (high nibble):
+
+| Value | Name | PP1 | PP2 |
+|---|---|---|---|
+| `0x0` | `SOLID` | yes | yes |
+| `0x1` | `PULSE` | yes | yes |
+| `0x2` | `SPIN` | — | yes |
+| `0x3` | `RAINBOW` | — | yes |
+| `0x4`–`0xF` | reserved | | |
+
+**Degradation rule.** Unsupported or reserved values render as the nearest
+supported thing — never an error. Unknown animation → `SOLID`; unknown color
+→ `REMOTE_DEFAULT`; an animation the device cannot show → `SOLID`.
+`SET_MAPPING` accepts **any** param on `FORWARD` (there is no `BAD_ACTION`
+for appearance) and `GET_MAPPING` returns it verbatim — degradation happens
+at render time only. This is deliberate: it lets the appearance catalog grow
+past what any one pump implements, so a newer host talking to an older pump
+degrades gracefully instead of failing. Same spirit as "unknown control IDs
+must decode as `UNKNOWN` and pass through."
+
+**Per-control resolution.** The appearance is rendered per *control*, but
+stored per `(control, gesture, slot)`. Two rules bridge the gap, both pure
+functions of the table:
+
+- A control renders an appearance only while it is **host-owned** in the
+  active slot: at least one of its gestures is `FORWARD` and none is mapped
+  to a local action (`NONE` cells are neutral). A button that keeps, say, a
+  local long-press action is not remote, and badging it would lie.
+- The control's appearance is the **first non-zero param among its `FORWARD`
+  cells, scanned in gesture-ID order** (`TAP`=1 … `PRESS`=6). If every
+  `FORWARD` param is zero, the appearance is `SOLID` + `REMOTE_DEFAULT`.
+  Zero params are "no preference" — implicit `FORWARD` cells (PP2's
+  CONNECTED default) never mask an explicitly written appearance. Hosts
+  should still write the same appearance to every `FORWARD` cell of a
+  control.
+
+**Per-device rendering:**
+
+- **PP1 — static badge.** Each host-owned button shows its appearance on its
+  own LEDs, replacing the state-machine color. `REMOTE_DEFAULT` is the
+  classic purple remote badge; `OFF` leaves the button dark; `SPIN` and
+  `RAINBOW` degrade to `SOLID`.
+- **PP2 — momentary echo.** One ring serves five controls, so a static
+  per-control badge is impossible. On a host-owned control's activation edge
+  (the wire `PRESS`), the ring briefly (~200 ms) shows that control's
+  appearance, then settles back to idle. `ENCODER` never echoes — a fast
+  spin would strobe; its appearance instead **replaces the ring's idle**
+  (the vendor-connected rainbow) while the vendor host is active, live on
+  `SET_MAPPING`. Colors `REMOTE_DEFAULT` and `OFF` render as *no
+  indication* — no echo, idle untouched — so a default table (all params
+  zero) lights nothing new. The sleep gesture owns the ring outright: the
+  MENU hold-progress preview and the sleep animation always win over an
+  echo.
+
+**Backward compatibility.** `param = 0x00` → `SOLID` + `REMOTE_DEFAULT`,
+byte-identical to prior behavior (PP1's fixed purple badge, nothing on PP2).
+Every mapping table committed in the field is already correct; no migration,
+no version gate — the protocol version byte stays `2`.
+
 ### Persistence semantics
 
 - `SET_MAPPING` updates RAM only (no flash wear during interactive config);
@@ -356,8 +441,10 @@ until the menu exits.
 - **Factory reset gesture** (escape hatch): hold at power-on for 3 s —
   PP1: LIFT+DROP, PP2: MENU+ACTION. LED flash confirms; resets mappings to
   defaults and persists.
-- Buttons whose active-slot action is `FORWARD` show a fixed device-side
-  "remote mode" LED color (PP1; PP2 has no per-button LEDs).
+- Host-owned controls render their persisted appearance (`FORWARD`'s param —
+  see §Control appearance): a static per-button badge on PP1, a momentary
+  ring echo on PP2. All-zero params reproduce the pre-appearance behavior —
+  the fixed purple remote badge on PP1, nothing on PP2.
 
 ### Default mapping tables
 
@@ -516,7 +603,10 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
    (queueing, 4 frames/tick drain); remember all controls publish while you
    are active — act only on controls your config assigned intents to.
 6. Read the mapping table with bulk `GET_MAPPING` on connect; write with
-   `SET_MAPPING` (live), persist with `COMMIT_MAPPINGS`.
+   `SET_MAPPING` (live), persist with `COMMIT_MAPPINGS`. When assigning a
+   host intent, write the control's appearance into `FORWARD`'s param —
+   the same value on every `FORWARD` cell of that control (§Control
+   appearance).
 7. Detect chords host-side from `PRESS`/`RELEASE`; chords exist only as host
    intents.
 8. To flash firmware: `ENTER_BOOTLOADER` with magic `0xB007`, wait for HID
@@ -527,7 +617,10 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
 - Chord detection in firmware (host-side only)
 - Modifier keys in `SEND_KEY` (PP1's legacy stdin protocol retains modifier
   configuration)
-- Host-controlled LEDs (fixed device-side "remote mode" color only)
+- Host-*driven* LEDs — there is no live LED channel, no new command, no new
+  frame type. The host declares an appearance at mapping time (`FORWARD`'s
+  param, persisted with the table); the device owns rendering, timing,
+  brightness and the STANDALONE fallback
 - Remappable sleep on PP2 (stays hardwired in `PowerStateManager`)
 
 ## Reference host implementations
@@ -540,6 +633,13 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
 
 ## Changelog
 
+- **v2, appearance addendum** (spec 2026-07-29,
+  robin7331/pixel-pump-two-firmware#7): `FORWARD`'s previously unused param
+  byte declares a control appearance — `(animation << 4) | color`, rendered
+  device-side (PP1 static per-button badge, PP2 momentary ring echo +
+  encoder idle). Reserved values degrade at render time, never error.
+  `param = 0x00` is byte-identical to prior behavior, so no migration and no
+  version-byte change.
 - **v2** (spec 2026-07-27; implementation state in the status table): protocol
   version byte `2`; model IDs + `HAS_MODEL` flag + `GET_INFO`; ControlIds
   7–15 (pedals both devices, PP1 buttons, trigger/pedal split); two-layer

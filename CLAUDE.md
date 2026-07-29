@@ -38,7 +38,7 @@ Three of those are worth stating up front because they are cheap to trip and exp
   640 KiB firmware / 1408 KiB littlefs, but `memmap_mp_rp2040.ld` is handed the *whole* 2 MB — an
   oversized image links silently and then overwrites the filesystem, `settings.json` included, on
   first boot. The boundary cannot move without wiping every unit in the field, so this check is the
-  only guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 392,796 B full, ~59 % of
+  only guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 393,772 B full, ~60 % of
   ceiling.
 - **The MicroPython checkout already exists at `./micropython`** — v1.28.0, submodules fetched, both
   variants built, ~450 MB, ignored via `.gitignore`. Do not re-clone it; the disk runs close to full.
@@ -297,6 +297,22 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
 - **Remote-mode LED:** purple at `Brightness.DIMMER` on buttons whose active-slot gestures are all
   `FORWARD`/`NONE`. Applied on transition, snapshotting and restoring the button's colour and pulsate
   state; it deliberately does not fight the state machine afterwards.
+- **Control appearance** (issue #35, spec §Control appearance): `FORWARD`'s param is
+  `(animation << 4) | colour`, so a host can badge each forwarded button rather than getting six
+  identical purple ones. `decode_appearance()` degrades at *render* time and `is_valid_action()`
+  deliberately does not check the param — a reserved byte must ACK and round-trip verbatim, or the
+  catalog could never outgrow this firmware. PP1 draws `SOLID` and `PULSE`; `SPIN`/`RAINBOW` are
+  ring-only and land as `SOLID`. Three things are easy to get wrong:
+  - **`APPEARANCE_SCAN` is gesture-*id* order, which `GESTURES` is not** (`GESTURES` leads with
+    `PRESS` because dispatch cares about the press edge). The appearance is the first non-zero param
+    among the `FORWARD` cells in id order, so an implicit zero-param `FORWARD` never masks one a host
+    wrote. Don't reuse `GESTURES` here.
+  - **A repaint keeps the *original* snapshot.** `_apply_remote_leds` re-renders when the appearance
+    changes while a button stays remote; restoring the purple badge on the way out instead of the
+    state machine's colour would strand the LED.
+  - `Colors.AMBER` / `Colors.CYAN` exist only for this palette and carry no device-side meaning,
+    unlike BLUE/RED/GREEN/PURPLE. Brightness stays device-owned — the global user setting must keep
+    winning, which is why the host picks colour and animation but not brightness.
 - **Factory reset:** LIFT + DROP held 3 s at power-on, checked before the boot sequence, resets the
   table and flashes the LEDs white. This is the only way back from a table that forwards every button.
 

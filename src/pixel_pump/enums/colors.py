@@ -8,3 +8,7 @@ class Colors:
     # owns it. Deliberately unlike BLUE/RED/GREEN, which mean mode, cancel and
     # vacuum.
     PURPLE = (160, 60, 230)
+    # Host-assignable only: these two carry no device-side meaning and exist
+    # so a host can badge a forwarded button (mapping.py's APPEARANCE_COLORS).
+    AMBER = (255, 150, 20)
+    CYAN = (31, 226, 226)

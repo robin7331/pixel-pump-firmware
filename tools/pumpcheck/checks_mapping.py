@@ -12,8 +12,10 @@ actually for lives here:
   - SET_MAPPING is live in RAM and slot-scoped; COMMIT and RESET both ACK, and
     RESET restores the defaults
   - COMMIT_MAPPINGS actually reaches flash, and SET_MAPPING actually does not
-  - slot switching and the remote-mode LED, including the instant STANDALONE
-    fallback when the host heartbeat lapses
+  - FORWARD's param -- the control appearance -- is stored verbatim, reserved
+    values included, because degradation is a render-time rule
+  - slot switching and the remote-mode LED, including the appearance a host
+    declared and the instant STANDALONE fallback when the heartbeat lapses
   - the factory reset gesture (opt-in -- it wants a power cycle)
 
 Slot switching needs someone to look at the pump and press a button, but the
@@ -62,6 +64,10 @@ STANDALONE = MappingSlot.STANDALONE
 CONNECTED = MappingSlot.CONNECTED
 
 WRONG_RESET_MAGIC = 0x1234
+
+# Appearance params, (animation << 4) | color. PULSE+GREEN is what the live
+# check paints on LIFT; it has to be visibly unlike the purple default.
+APPEARANCE_PULSE_GREEN = 0x13
 
 
 def _entry(frame):
@@ -242,6 +248,47 @@ def check_set_commit_reset(session):
     return report("SET / COMMIT / RESET round-trip", problems)
 
 
+def check_appearance_param(session):
+    """FORWARD's param is the control appearance: stored verbatim, never refused.
+
+    Degradation is specified as a render-time rule, so the command layer has to
+    accept params this firmware cannot draw -- otherwise a newer host's
+    appearance catalog could never outgrow an older pump. What the LEDs make of
+    them needs eyes; check_slot_switch covers that half.
+    """
+    problems = []
+
+    # Two appearances PP1 renders, and a fully reserved byte it does not.
+    for param, label in (
+        (0x03, "SOLID+GREEN"),
+        (APPEARANCE_PULSE_GREEN, "PULSE+GREEN"),
+        (0xFF, "reserved 0xFF"),
+    ):
+        frame = set_mapping(
+            session, ControlId.LIFT, CONNECTED, Gesture.TAP, Action.FORWARD, param
+        )
+        if frame is None or frame[1] != MessageType.ACK:
+            problems.append(f"SET_MAPPING FORWARD({label}) did not ACK")
+        frame = get_mapping(session, ControlId.LIFT, CONNECTED, Gesture.TAP)
+        if frame is None or (frame[5], frame[6]) != (Action.FORWARD, param):
+            problems.append(f"FORWARD param {label} did not round-trip verbatim")
+
+    # The appearance rides the table into the bulk dump like any other param.
+    entries, _terminators = bulk_dump(session)
+    got = {(c, s, g): (a, p) for c, s, g, a, p in entries} if entries else {}
+    if got.get((ControlId.LIFT, CONNECTED, Gesture.TAP)) != (Action.FORWARD, 0xFF):
+        problems.append("the bulk dump dropped the FORWARD param")
+
+    frame = reset_mappings(session, RESET_MAPPINGS_MAGIC)
+    if frame is None or frame[1] != MessageType.ACK:
+        problems.append("RESET_MAPPINGS did not ACK")
+    frame = get_mapping(session, ControlId.LIFT, CONNECTED, Gesture.TAP)
+    if frame is None or (frame[5], frame[6]) != (Action.NONE, 0x00):
+        problems.append("RESET_MAPPINGS did not clear the appearance")
+
+    return report("FORWARD's param carries the control appearance", problems)
+
+
 def check_commit_persistence(session, probe):
     """COMMIT_MAPPINGS reaches flash, proven without a reboot.
 
@@ -360,6 +407,23 @@ def check_slot_switch(session, probe):
     if not ask("Is the LIFT button now a distinct purple/violet, unlike the others?"):
         problems.append("remote-mode LED did not appear on LIFT")
 
+    # An all-zero param is the classic purple badge. Declaring an appearance
+    # has to repaint a button that is already remote, without a reconnect --
+    # hosts write the same param to every FORWARD cell of a control.
+    for gesture in (Gesture.PRESS, Gesture.LONG_HOLD):
+        set_mapping(
+            session,
+            ControlId.LIFT,
+            CONNECTED,
+            gesture,
+            Action.FORWARD,
+            APPEARANCE_PULSE_GREEN,
+        )
+    session.idle(1.5)
+
+    if not ask("Is LIFT now breathing green instead of purple?"):
+        problems.append("the appearance in FORWARD's param never reached the LEDs")
+
     print("\n    Now press the LIFT button once.")
     seen = session.await_press(ControlId.LIFT)
     time.sleep(0.4)
@@ -458,6 +522,7 @@ def run(rig):
     results.append(check_send_key_sentinel(bulk) if bulk else False)
     results.append(check_errors(session))
     results.append(check_set_commit_reset(session))
+    results.append(check_appearance_param(session))
     results.append(check_commit_persistence(session, probe))
 
     slot = check_slot_switch(session, probe)

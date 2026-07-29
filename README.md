@@ -180,8 +180,13 @@ vendor HID interface on usage page `0xFF00` that a host application uses to driv
   flash. Out of the box both columns are classic Pixel Pump behaviour, so a pump with no host
   attached acts exactly like it always did.
 
-If a host maps a button to `FORWARD` — meaning "just tell me, don't act" — that button glows purple
-while connected. Should you ever end up with a table that forwards everything and no host to undo it,
+If a host maps a button to `FORWARD` — meaning "just tell me, don't act" — that button lights up
+while connected, so you can see at a glance which buttons the host owns. The host picks the look
+along with the mapping: `FORWARD`'s parameter byte packs a colour and an animation (solid or
+breathing), and a button whose parameter is left at zero glows purple, the way it always did. The
+pump owns brightness, so your global brightness setting still wins.
+
+Should you ever end up with a table that forwards everything and no host to undo it,
 **hold Lift + Drop while powering on** for three seconds: the LEDs flash white and the table is back
 to defaults.
 

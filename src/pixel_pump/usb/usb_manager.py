@@ -44,6 +44,11 @@ class USBConnectionState:
 class USBManager:
     """Composite keyboard + vendor HID, and the host command handler.
 
+    ``keyboard_enabled=False`` builds the device without the keyboard
+    interface. It is read from settings.json before this object is constructed,
+    because enumeration happens in here and cannot be revisited afterwards --
+    the setting takes effect on the next boot, never on the running device.
+
     The mapping commands (GET_MAPPING, SET_MAPPING, RESET_MAPPINGS,
     COMMIT_MAPPINGS) delegate to the optional ``mapping`` object, which must
     provide:
@@ -67,6 +72,7 @@ class USBManager:
     def __init__(
         self,
         usb_interface_active=True,
+        keyboard_enabled=True,
         mapping=None,
         hold_repeat_ms=120,
         max_queue_size=32,
@@ -93,7 +99,7 @@ class USBManager:
         self.on_usb_data_connection_changed = on_usb_data_connection_changed
         self.on_usb_connection_state_changed = on_usb_connection_state_changed
 
-        self.keyboard = Keyboard()
+        self.keyboard = Keyboard(enabled=keyboard_enabled)
         self.vendor = VendorHIDInterface(
             on_frame_received=self._on_vendor_frame_received,
             host_activity_timeout_ms=vendor_host_activity_timeout_ms,
@@ -104,7 +110,18 @@ class USBManager:
         if usb_interface_active:
             # builtin_driver keeps the CDC/REPL interface alive, which the
             # legacy stdin protocol in CommunicationManager still needs.
-            usb.device.get().init(self.keyboard.kb, self.vendor, builtin_driver=True)
+            #
+            # With the keyboard disabled its interface is simply left out of the
+            # descriptor set, so the device presents no keyboard top-level
+            # collection and macOS has nothing to run its Keyboard Setup
+            # Assistant for. The vendor interface is unaffected beyond taking a
+            # lower interface number; hosts find it by usage page.
+            if keyboard_enabled:
+                usb.device.get().init(
+                    self.keyboard.kb, self.vendor, builtin_driver=True
+                )
+            else:
+                usb.device.get().init(self.vendor, builtin_driver=True)
 
         self._was_vendor_open = False
         self._was_vendor_active = False
@@ -422,6 +439,10 @@ class USBManager:
                 )
 
     def _resolve_connection_state(self, keyboard_open, vendor_active):
+        # With keyboard_enabled False there is no keyboard interface to open,
+        # so keyboard_open is always False and KEYBOARD_ONLY never resolves --
+        # such a pump reports NO_DATA until a vendor host talks to it. That is
+        # the truth about the device, not a gap in the state machine.
         if vendor_active:
             return USBConnectionState.VENDOR_HID
         if keyboard_open:

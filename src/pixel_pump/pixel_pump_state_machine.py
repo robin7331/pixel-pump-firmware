@@ -1,5 +1,4 @@
 
-from .settings_manager import SettingsManager
 from .states.lift_state import LiftState
 from .states.drop_state import DropState
 from .states.reverse_state import ReverseState
@@ -9,7 +8,7 @@ from .enums.colors import Colors
 
 
 class PixelPumpStateMachine:
-    def __init__(self, motor, ui_renderer, lift_button, drop_button, low_button, high_button, reverse_button, trigger_button, nc_valve, no_valve, three_way_valve):
+    def __init__(self, motor, ui_renderer, lift_button, drop_button, low_button, high_button, reverse_button, trigger_button, nc_valve, no_valve, three_way_valve, settings_manager):
         self.motor = motor
         self.ui_renderer = ui_renderer
         self.lift_button = lift_button
@@ -30,7 +29,11 @@ class PixelPumpStateMachine:
         self.low_power_setting = 0
         self.high_power_setting = 0
 
-        self.settings_manager = SettingsManager()
+        # Passed in rather than constructed here: pixel_pump.py needs
+        # keyboard_enabled before it initializes USB, which happens long before
+        # this object exists. Sharing the one instance keeps the enumerated
+        # device and the running firmware reading the same settings.json.
+        self.settings_manager = settings_manager
         self.ui_renderer.brightness_modifier = self.settings_manager.get_brightness()
         power_mode = self.settings_manager.get_power_mode()
 

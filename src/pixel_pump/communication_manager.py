@@ -151,6 +151,23 @@ class CommunicationManager:
             self.pixel_pump.high_duty = int(self.settings_manager.get_high_power_setting() * 2.55)
             return
         
+        if cmd == "set_keyboard_enabled":
+            if not self.check_valid_int_argument(arguments, 1):
+                return
+
+            # Deliberately does not reset, unlike settings:persist -- every
+            # other settings:set_* command leaves that to the host, which may
+            # want to write more than one key first. The keyboard interface is
+            # decided at enumeration, so this only shows up on the next boot.
+            enabled = int(arguments[1]) != 0
+            self.settings_manager.set_keyboard_enabled(enabled)
+            # The echo is required by docs/usb-communication.md, unlike every
+            # other settings:set_* command here: PP2 shares this command over a
+            # CDC line protocol that carries nothing else, so the reply is the
+            # host's only confirmation the value landed.
+            print("keyboard_enabled:" + ("1" if enabled else "0"))
+            return
+
         if cmd == "set_secondary_pedal_key":
             if not self.check_valid_hex_argument(arguments, 1):
                 return

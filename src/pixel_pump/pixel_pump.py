@@ -8,6 +8,7 @@ from .controls.io_event_source import IOEventSource
 from .controls.io_event import IOEvent
 from .mapping import MappingEngine, MappingTable, check_factory_reset
 from .pixel_pump_state_machine import PixelPumpStateMachine
+from .settings_manager import SettingsManager
 from .valve import Valve
 from .boot_sequence import run_boot_sequence
 from .motor import Motor
@@ -194,11 +195,20 @@ def SetPadQSPI(pin, d, s):
 for pin in range(6):
     SetPadQSPI(pin, 0, 0) # Drive = 0 (2mA), Slew = 0 (slow)
 
+# Constructed here, ahead of the USB init, because keyboard_enabled decides
+# whether the keyboard interface is registered at all and enumeration happens
+# inside that init. PixelPumpStateMachine is handed this same instance further
+# down -- settings.json is parsed once, and USB can never enumerate on a
+# different view of it than the rest of the firmware runs on.
+settings_manager = SettingsManager()
+
 # USB is initialized once, here, so the host has finished enumerating the
 # composite keyboard + vendor HID device by the time the boot sequence ends.
 # builtin_driver keeps the CDC interface, which CommunicationManager reads the
 # legacy stdin protocol from.
-usb_manager = USBManager(debug=False)
+usb_manager = USBManager(
+    keyboard_enabled=settings_manager.get_keyboard_enabled(), debug=False
+)
 
 def _button_event_to_usb_event_kind(event):
     if event == ButtonEvent.TOUCH_DOWN:
@@ -368,7 +378,8 @@ pixel_pump = PixelPumpStateMachine(motor=motor,
                        trigger_button=trigger_button,
                        nc_valve=nc_valve,
                        no_valve=no_valve,
-                       three_way_valve=three_way_valve)
+                       three_way_valve=three_way_valve,
+                       settings_manager=settings_manager)
 
 communication_manager = CommunicationManager(pixel_pump)
 

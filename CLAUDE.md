@@ -27,6 +27,11 @@ Two UF2s come out of every build:
 > remain, neither blocking: the aux pedal's keystroke is confirmed only as far as the mapping table
 > reporting it, and `COMMIT_MAPPINGS` persistence has not been proven independently of the reset that
 > follows it. See the plan doc's Phase 4 gate.
+>
+> Issue #33 (`keyboard_enabled`) also landed on this branch, after the #30 gate closed. It builds and
+> fits, but **nothing about it is verified on hardware yet** — the acceptance items that matter are
+> the ones only a Mac can answer: `ioreg -c IOHIDDevice` showing no keyboard interface with it off,
+> and the Keyboard Setup Assistant staying away on a Mac that has never seen the pump.
 
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.28.0, async). Different
 > architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept
@@ -76,7 +81,7 @@ hard-errors on `MICROPY_BOARD_VARIANT`.
 640 KiB firmware / 1408 KiB littlefs, but `memmap_mp_rp2040.ld` is handed the *whole* 2 MB — an
 oversized image links silently and then overwrites the filesystem, `settings.json` included, on first
 boot. The boundary cannot move without wiping every unit in the field, so this check is the only
-guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 392,404 B full, ~59 % of ceiling.
+guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 392,796 B full, ~59 % of ceiling.
 
 | Workflow | Job | Trigger | Release |
 |----------|-----|---------|---------|
@@ -197,7 +202,7 @@ Conventions worth preserving:
 | `usb/protocol.py` | Frame encode/decode + the whole v2 wire vocabulary. Keep byte-identical with PP2 |
 | `usb/vendor_hid.py` | Vendor HID interface (usage page `0xFF00`), TX seq, host-activity tracking |
 | `usb/usb_manager.py` | Owns both HID interfaces, event queue, heartbeat, host command dispatch |
-| `usb/keyboard.py` | `KeyboardInterface` wrapper; translates stored HID usages to negative modifiers |
+| `usb/keyboard.py` | `KeyboardInterface` wrapper; translates stored HID usages to negative modifiers. `enabled=False` builds no interface and every send answers `False` |
 | `mapping.py` | `MappingTable` (persisted table + the `USBManager` contract) and `MappingEngine` (dispatcher, pump refcount, remote-mode LEDs), plus the factory-reset gesture |
 | `communication_manager.py` | Serial command protocol over USB stdin (non-blocking `select.poll`) |
 | `settings_manager.py` | `settings.json` on device flash, with forward/backward key migration |
@@ -242,6 +247,7 @@ settings:set_mode:lift|drop|reverse
 settings:set_power_mode:high|low
 settings:set_low_power_setting:<0-100>
 settings:set_high_power_setting:<0-100>
+settings:set_keyboard_enabled:0|1             → keyboard_enabled:0|1  (next boot)
 settings:set_secondary_pedal_key[_modifier]:<hex>
 settings:set_secondary_pedal_long_key[_modifier]:<hex>
 ```
@@ -250,7 +256,18 @@ settings:set_secondary_pedal_long_key[_modifier]:<hex>
 
 This protocol is **not** superseded by vendor HID — it stays the configuration path for the four
 `secondary_pedal_*` keys, which the wire protocol deliberately cannot carry (`SEND_KEY` has no
-modifier byte). Both paths are live at once.
+modifier byte), and for `keyboard_enabled`. Both paths are live at once.
+
+`set_keyboard_enabled` is the only settings key that changes what the device *is* rather than how it
+behaves, so it is worth knowing four things about it. It is the one `settings:set_*` that **echoes**
+— `keyboard_enabled:0|1`, normalised, not a parrot of what was sent — because
+`docs/usb-communication.md` specifies it: PP2 shares this command over a CDC line protocol carrying
+nothing else, so the reply is the host's only confirmation. It does **not** reset the pump, unlike
+`settings:persist` and `settings:reset`, because a host usually writes several keys before
+rebooting; nothing happens until `reset:hard` or a power cycle. Any nonzero int is on. And an old
+host that writes the whole dict through `settings:persist` without the key silently re-enables the
+keyboard, since `migrate_settings()` fills the gap from `DEFAULT_SETTINGS`; that fails safe, but it
+will surprise anyone debugging why the interface came back.
 
 ## Vendor HID (protocol v2)
 
@@ -259,6 +276,13 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
 `builtin_driver=True` so the CDC interface survives for `CommunicationManager`.
 
 - Composite device: HID keyboard + `Pixel Pump Vendor HID` (usage page `0xFF00`), 8-byte reports.
+  The keyboard half is conditional: `settings.json`'s `keyboard_enabled` (default `true`) decides
+  whether that interface is registered at all, which is the only device-side way to stop macOS'
+  Keyboard Setup Assistant (issue #33; `bCountryCode` does not drive it, see #31). This is why
+  `SettingsManager` is constructed in `pixel_pump.py` *above* the USB init and then handed to
+  `PixelPumpStateMachine` — the key has to be readable before the interfaces are registered, and one
+  shared instance means USB can never enumerate on a different view of `settings.json` than the rest
+  of the firmware runs on. Keep that ordering.
 - Device heartbeat every 500 ms carrying model id `1` and the firmware semver. The host counts as
   *active* only while it writes to the vendor OUT path (1200 ms timeout) — opening the interface is
   not enough.

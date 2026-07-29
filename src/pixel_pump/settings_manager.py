@@ -6,6 +6,11 @@ DEFAULT_SETTINGS = {
     "high_power_setting": 100,
     "power_mode": 1,
     "mode": 0,
+    # False drops the keyboard HID interface at enumeration, which is the only
+    # device-side way to stop macOS' Keyboard Setup Assistant appearing on first
+    # plug-in. Default True: the aux pedal sends keystrokes and that is shipped
+    # behaviour, so nobody loses it by upgrading.
+    "keyboard_enabled": True,
     "secondary_pedal_key": 0x11,
     "secondary_pedal_key_modifier": 0x00,
     "secondary_pedal_long_key": 0x52,
@@ -128,6 +133,15 @@ class SettingsManager:
 
     def set_mode(self, mode, persist=True):
         self.set_property("mode", mode, persist)
+
+    def get_keyboard_enabled(self):
+        # Coerced rather than returned raw: settings:persist lets a host write
+        # this key as 0/1 or true/false, and whether the pump enumerates a
+        # keyboard must not depend on which one it picked.
+        return bool(self.get_property("keyboard_enabled", default=True))
+
+    def set_keyboard_enabled(self, enabled, persist=True):
+        self.set_property("keyboard_enabled", bool(enabled), persist)
 
     # add methods to set and get the secondary_pedal_key which is a hex code as 0x11
     def set_secondary_pedal_key(self, key, persist=True):

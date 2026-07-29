@@ -24,10 +24,12 @@ Two UF2s come out of every build:
 > Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
 >
 > Phases 2, 3 and 4 are all verified on a physical pump (2026-07-28), wire checks included —
-> `tools/phase3_wire_check.py` and `tools/phase4_wire_check.py` both pass end to end. Two narrow gaps
-> remain, neither blocking: the aux pedal's keystroke is confirmed only as far as the mapping table
-> reporting it, and `COMMIT_MAPPINGS` persistence has not been proven independently of the reset that
-> follows it. See the plan doc's Phase 4 gate.
+> `tools/phase3_wire_check.py` and `tools/phase4_wire_check.py` both pass end to end. Of the two narrow
+> gaps the Phase 4 gate left, `COMMIT_MAPPINGS` persistence closed on 2026-07-29: `phase4_wire_check.py`
+> gained check H, which reads `settings.json` over CDC between the commit and the reset and so also
+> proves SET_MAPPING leaves flash alone. One gap remains, not blocking — the aux pedal's keystroke is
+> still confirmed only as far as the mapping table reporting it; `issue33_acceptance.py` check F closes
+> it, and wants a pedal tap. See the plan doc's Phase 4 gate.
 >
 > Issue #33 (`keyboard_enabled`) also landed on this branch, after the #30 gate closed, and is
 > **verified on the dev pump as of 2026-07-29** — `tools/issue33_acceptance.py --auto` passes all four
@@ -306,7 +308,8 @@ side is `src/pixel_pump/usb/`; USB is initialized **once**, early in `pixel_pump
   `ERROR BAD_MAGIC` and must never reboot the pump mid-assembly.
 - To watch the wire, four interactive checkers live in `tools/` — `phase3_wire_check.py` (control ids,
   gestures, heartbeat model), `phase4_wire_check.py` (the mapping commands, slot switching,
-  remote-mode LED, factory reset), `phase6_acceptance.py` (`GET_VERSION` cross-checked against the
+  remote-mode LED, factory reset, and check H's flash-persistence proof),
+  `phase6_acceptance.py` (`GET_VERSION` cross-checked against the
   heartbeat and CDC, `GET_INFO`, and both `ENTER_BOOTLOADER` magics) and `issue33_acceptance.py`
   (`keyboard_enabled` — the CDC echo, the keyboard collection's absence per both `hid.enumerate()` and
   `ioreg`, and that everything else survives without it). PP2's `tools/usb-coms` gives a raw frame

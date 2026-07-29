@@ -48,7 +48,6 @@ only opens one for a process holding Input Monitoring. If it reports
 check `pgrep -fl pixel-pump-daemon` before touching System Settings.
 """
 
-import json
 import os
 import select
 import subprocess
@@ -162,36 +161,11 @@ def wait_for_vendor(present, timeout_s=ENUMERATION_TIMEOUT_S):
 
 
 class CDC(ModeProbe):
-    """phase4's CDC probe, plus the commands this check needs.
+    """phase4's CDC probe, plus the two commands this check needs.
 
     Subclassed rather than rewritten so the port discovery, the pyserial
-    fallback and `version:info` all stay in one place.
+    fallback, `send`, `dump` and `version_info` all stay in one place.
     """
-
-    def send(self, line, wait_s=0.8):
-        """Write one command, return whatever came back as raw text."""
-        if not self.available:
-            return ""
-        try:
-            self.serial.reset_input_buffer()
-            self.serial.write(line.encode() + b"\r\n")
-            self.serial.flush()
-            time.sleep(wait_s)
-            return self.serial.read(self.serial.in_waiting or 1).decode(errors="replace")
-        except Exception:  # noqa: BLE001 - a dead port reads the same as a silent one
-            return ""
-
-    def dump(self):
-        """settings.json as a dict, or None."""
-        raw = self.send("settings:dump")
-        for line in raw.splitlines():
-            line = line.strip()
-            if line.startswith("{"):
-                try:
-                    return json.loads(line)
-                except ValueError:
-                    return None
-        return None
 
     def set_keyboard_enabled(self, enabled):
         """Returns the echoed line, e.g. "keyboard_enabled:0", or None."""

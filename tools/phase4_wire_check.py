@@ -11,16 +11,23 @@ engine is actually for, none of which Phase 3's check touches:
      BAD_ACTION (unknown, and valid-but-wrong-gesture), BAD_MAGIC
   E. SET_MAPPING is live in RAM and slot-scoped; COMMIT and RESET both ACK,
      and RESET restores the defaults
+  H. COMMIT_MAPPINGS actually reaches flash, and SET_MAPPING actually does not
+     -- read out of settings.json over CDC between the commit and the reset,
+     which is the only way to tell the two apart
   F. slot switching and the remote-mode LED, including the instant STANDALONE
      fallback when the host heartbeat lapses
   G. the factory reset gesture (optional -- needs a power cycle)
 
-Checks A-E are automatic. F needs someone to look at the pump and press a
-button; the *verdict* is still taken from the device rather than from a yes/no
-answer, by reading `mode` back over the CDC port -- a FORWARD button that
-still switches modes is the failure this exists to catch, and it is not
-visible on the vendor interface, since publish-all reports the press either
-way.
+Checks A-E and H are automatic, and run in that order. F needs someone to look
+at the pump and press a button; the *verdict* is still taken from the device
+rather than from a yes/no answer, by reading `mode` back over the CDC port -- a
+FORWARD button that still switches modes is the failure this exists to catch,
+and it is not visible on the vendor interface, since publish-all reports the
+press either way.
+
+H was added after the Phase 4 gate closed, to shut the one hole G could not:
+G committed an override and then watched the factory reset wipe it, which is
+equally consistent with the commit never having reached flash at all.
 
 CPython, not MicroPython -- it runs on the host, like generateVersionFile.py.
 
@@ -37,6 +44,7 @@ The pump is left on the default table: the run ends with RESET_MAPPINGS.
 """
 
 import glob
+import json
 import subprocess
 import sys
 import threading
@@ -401,42 +409,54 @@ class ModeProbe:
     def available(self):
         return self.serial is not None
 
-    def mode(self):
+    def send(self, line, wait_s=0.8):
+        """Write one command, return whatever came back as raw text."""
         if not self.available:
-            return None
-        import json
-
+            return ""
         try:
             self.serial.reset_input_buffer()
-            self.serial.write(b"settings:dump\r\n")
+            self.serial.write(line.encode() + b"\r\n")
             self.serial.flush()
-            time.sleep(0.8)
-            raw = self.serial.read(self.serial.in_waiting or 1).decode(errors="replace")
-            for line in raw.splitlines():
-                line = line.strip()
-                if line.startswith("{"):
-                    return json.loads(line).get("mode")
-        except Exception:  # noqa: BLE001
-            return None
+            time.sleep(wait_s)
+            return self.serial.read(self.serial.in_waiting or 1).decode(errors="replace")
+        except Exception:  # noqa: BLE001 - a dead port reads the same as a silent one
+            return ""
+
+    def dump(self):
+        """settings.json as a dict, or None.
+
+        The only route to what is actually *in flash*: the vendor interface
+        answers GET_MAPPING from RAM, so it cannot tell a committed row from an
+        uncommitted one. See check H.
+        """
+        for line in self.send("settings:dump").splitlines():
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    return json.loads(line)
+                except ValueError:
+                    return None
         return None
+
+    def mode(self):
+        settings = self.dump()
+        return None if settings is None else settings.get("mode")
+
+    def mappings(self):
+        """The persisted override rows, as lists. None if the dump failed."""
+        settings = self.dump()
+        if settings is None:
+            return None
+        rows = settings.get("mappings")
+        return None if not isinstance(rows, list) else [list(row) for row in rows]
 
     def version_info(self):
         """`version:info` -> "tag,branch,commit_hash,timestamp", or None."""
-        if not self.available:
-            return None
-        try:
-            self.serial.reset_input_buffer()
-            self.serial.write(b"version:info\r\n")
-            self.serial.flush()
-            time.sleep(0.8)
-            raw = self.serial.read(self.serial.in_waiting or 1).decode(errors="replace")
-            for line in raw.splitlines():
-                line = line.strip()
-                # Four comma-separated fields, and not the settings JSON.
-                if line and not line.startswith("{") and line.count(",") == 3:
-                    return line
-        except Exception:  # noqa: BLE001
-            return None
+        for line in self.send("version:info").splitlines():
+            line = line.strip()
+            # Four comma-separated fields, and not the settings JSON.
+            if line and not line.startswith("{") and line.count(",") == 3:
+                return line
         return None
 
     def close(self):
@@ -660,6 +680,91 @@ def check_set_commit_reset(session):
     return report("E  SET / COMMIT / RESET round-trip", problems)
 
 
+def check_commit_persistence(session, probe):
+    """H -- COMMIT_MAPPINGS reaches flash, proven without a reboot.
+
+    The Phase 4 gate left this open. Check G committed an override and then
+    watched the factory reset wipe it, which is exactly as consistent with the
+    commit never having reached flash in the first place -- the evidence was
+    destroyed by the thing being used to test it.
+
+    Reading settings.json over CDC *between* the commit and the reset settles
+    it, and the same read proves the other half of the contract for free:
+    SET_MAPPING alone must be RAM only. GET_MAPPING cannot distinguish the two,
+    since it answers from RAM either way.
+
+    Leaves the table clean -- it ends on RESET_MAPPINGS, like the rest of the run.
+    """
+    problems = []
+    if not probe.available:
+        return report(
+            "H  COMMIT_MAPPINGS reaches flash",
+            [f"needs the CDC port to read settings.json ({probe.reason})"],
+        )
+
+    # [control, slot, gesture, action, param], as mapping.py's commit() stores it.
+    expected_row = [REVERSE, CONNECTED, G_PRESS, A_FORWARD, 0]
+
+    session.command(CMD_RESET_MAPPINGS, b5=RESET_MAGIC & 0xFF, b6=RESET_MAGIC >> 8)
+    if (session.read(3.0, want=(MSG_ACK, MSG_ERROR)) or [0, 0])[1] != MSG_ACK:
+        return report("H  COMMIT_MAPPINGS reaches flash", ["could not reset to a clean table first"])
+
+    rows = probe.mappings()
+    if rows is None:
+        return report("H  COMMIT_MAPPINGS reaches flash", ["settings.json has no readable mappings key"])
+    if rows:
+        problems.append(f"flash still held {len(rows)} row(s) straight after a reset: {rows}")
+
+    frame = set_mapping(session, REVERSE, CONNECTED, G_PRESS, A_FORWARD)
+    if frame is None or frame[1] != MSG_ACK:
+        return report("H  COMMIT_MAPPINGS reaches flash", ["SET_MAPPING did not ACK"])
+
+    rows = probe.mappings()
+    if rows is None:
+        problems.append("settings:dump stopped answering after SET_MAPPING")
+    elif expected_row in rows:
+        problems.append(
+            "SET_MAPPING alone wrote the row to flash -- it is specified as RAM only, "
+            "so COMMIT_MAPPINGS would be doing nothing and every host write would "
+            "burn a flash cycle"
+        )
+    else:
+        print("        SET_MAPPING left flash untouched")
+
+    session.command(CMD_COMMIT_MAPPINGS)
+    if (session.read(3.0, want=(MSG_ACK, MSG_ERROR)) or [0, 0])[1] != MSG_ACK:
+        problems.append("COMMIT_MAPPINGS did not ACK")
+
+    rows = probe.mappings()
+    if rows is None:
+        problems.append("settings:dump stopped answering after COMMIT_MAPPINGS")
+    elif expected_row not in rows:
+        # This is the gap. A pass here is the first direct evidence the commit
+        # lands, rather than an inference drawn from what a reboot showed.
+        problems.append(
+            f"committed row absent from flash -- settings.json holds {rows}, "
+            f"expected to find {expected_row}"
+        )
+    else:
+        print(f"        COMMIT_MAPPINGS wrote {describe(tuple(expected_row))} to flash")
+        if len(rows) > 1:
+            problems.append(f"flash holds {len(rows)} rows, expected only the one: {rows}")
+
+    session.command(CMD_RESET_MAPPINGS, b5=RESET_MAGIC & 0xFF, b6=RESET_MAGIC >> 8)
+    if (session.read(3.0, want=(MSG_ACK, MSG_ERROR)) or [0, 0])[1] != MSG_ACK:
+        problems.append("RESET_MAPPINGS did not ACK")
+
+    rows = probe.mappings()
+    if rows is None:
+        problems.append("settings:dump stopped answering after RESET_MAPPINGS")
+    elif rows:
+        problems.append(f"RESET_MAPPINGS left {rows} behind in flash")
+    else:
+        print("        RESET_MAPPINGS cleared flash again")
+
+    return report("H  COMMIT_MAPPINGS reaches flash, SET_MAPPING does not", problems)
+
+
 def check_slot_switch(session, probe):
     """Remote-mode LED and the STANDALONE fallback, live."""
     problems = []
@@ -818,6 +923,7 @@ def main():
     results.append(check_send_key_sentinel(bulk) if bulk else False)
     results.append(check_errors(session))
     results.append(check_set_commit_reset(session))
+    results.append(check_commit_persistence(session, probe))
     results.append(check_slot_switch(session, probe))
 
     factory = check_factory_reset(session, device)

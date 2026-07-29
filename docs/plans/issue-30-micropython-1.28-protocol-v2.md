@@ -272,17 +272,23 @@ press time — publish-all only emits while it is, so a missing frame is now rep
 rather than as a failed mapping. **Lesson for any future interactive check on this device: a blocking
 prompt is a disconnection.**
 
-Two narrow gaps remain, neither blocking:
+Two narrow gaps remained, neither blocking. One is now closed:
 
 - [ ] the aux pedal actually *typing* the configured key (check C proves the read path reports it,
-      not that the keystroke lands)
-- [ ] `COMMIT_MAPPINGS` persistence proven independently — check G's override was committed and then
-      wiped by the reset, which is also consistent with it never having reached flash. Reading
-      `settings.json` over CDC between the commit and the reset would settle it
+      not that the keystroke lands). Closable by `tools/issue33_acceptance.py` check F, which reads
+      the keystroke off the terminal in raw mode — it needs a pedal tap, so it has not been run
+- [x] `COMMIT_MAPPINGS` persistence proven independently — **closed 2026-07-29** by check H, added to
+      `phase4_wire_check.py` for exactly this. Check G's override was committed and then wiped by the
+      reset, which was equally consistent with the commit never having reached flash: the evidence
+      was destroyed by the thing testing it. H reads `settings.json` over CDC *between* the commit
+      and the reset, and gets the other half of the contract for free — SET_MAPPING alone must leave
+      flash untouched, which `GET_MAPPING` cannot show, since it answers from RAM either way.
+      Passed on the dev pump: SET_MAPPING wrote nothing, COMMIT wrote `[14, 1, 6, 1, 0]`, RESET
+      cleared it
 
-`tools/phase4_wire_check.py` covers all five. Checks A–E are automatic; F needs someone to look at the
-pump and press LIFT, and G needs a power cycle and is opt-in. It ends with `RESET_MAPPINGS`, so it
-leaves the pump on the default table.
+`tools/phase4_wire_check.py` covers all six. Checks A–E and H are automatic; F needs someone to look
+at the pump and press LIFT, and G needs a power cycle and is opt-in. It ends with `RESET_MAPPINGS`, so
+it leaves the pump on the default table.
 
     DYLD_LIBRARY_PATH=/opt/homebrew/lib uv run --with hid --with pyserial \
         python tools/phase4_wire_check.py

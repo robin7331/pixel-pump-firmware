@@ -318,8 +318,17 @@ board-factory's `docs/website-pixel-pump-firmware-endpoint.md`. What is not obvi
 - **Tags must be strict `vMAJOR.MINOR.PATCH`.** The device reports three bytes, so a prerelease suffix
   cannot exist on the wire and must not reach the feed. This repo's history carries `latest`, `false`
   and a malformed `v.0.0.4`; the job's `startsWith(tag, 'v')` condition skips the first two and the
-  semver check fails loudly on the third. `pixel_pump_dev.yml`'s rolling `latest` prerelease is
-  therefore safe to publish — it is a no-op, not a bad ingest.
+  semver check fails loudly on the third. Those tags are dead now (see below) but the guards stay —
+  they are what makes publishing anything unexpected a no-op rather than a bad ingest.
+- **There is one long-lived branch, `main`, and no prerelease channel.** The `dev` branch and
+  `pixel_pump_dev.yml`'s rolling `latest` draft prerelease were both retired on 2026-07-29 to match
+  PP2, which never had either. `local.yml` replaced that workflow: it runs the same build plus
+  `checkFirmwareSize.sh` and `pump_check.py static` on **every push, any branch**, and produces
+  nothing. It is the only CI between a commit and a release tag, so do not weaken it — deleting it
+  would leave the size check, the one guard against overwriting littlefs, running nowhere until a
+  release. Beta/dev distribution was deliberately deferred, not designed away: the wire can already
+  say "dev build" (`Flags.DEV_BUILD`) but not *which* dev build, since the three version bytes are
+  the last tag. That is the real blocker, and it is firmware-side, not website-side.
 - **A `release: published` event runs the workflow file from the tag's commit, not from `main`.** So a
   fix landed after a failed publish cannot re-run that publish; `workflow_dispatch` with the tag is the
   recovery path, and it is why that trigger exists. By the same rule a tag cut before the workflow

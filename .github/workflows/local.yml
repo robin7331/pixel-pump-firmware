@@ -1,16 +1,26 @@
-name: Pixel Pump Dev
+# local: the build guard on every push, on whatever branch.
+#
+# This is the only CI between a commit and a release tag — pixel_pump_main.yml
+# fires on `v*` only. It produces nothing: no artifacts, no release, no tag.
+# Its whole job is to fail before a bad image can be cut, which is why it runs
+# checkFirmwareSize.sh (an oversized image links silently and then overwrites
+# the littlefs partition, settings.json included, on first boot) and
+# pump_check.py static (the default mapping table drifting from what the
+# hardware checks expect).
+#
+# Replaced pixel_pump_dev.yml, which did the same build and then published a
+# draft prerelease on the rolling `latest` tag. The dev branch and the
+# prerelease concept both went away on 2026-07-29; releases are now a `v*` tag
+# off main, reviewed as a draft, and published by hand. PP2 carries the same
+# workflow under the same name.
 
+name: Pixel Pump Local
 
 on:
   push:
-    branches:
-      - dev
-  pull_request:
-    branches:
-      - dev
 
 jobs:
-  dev-build:
+  local:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -42,29 +52,13 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP BOARD_VARIANT=EMPTY
-        cp $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.uf2 $GITHUB_WORKSPACE/firmware-blank.uf2
     - name: Build Pixel Pump Firmware
       run: |
         cd $GITHUB_WORKSPACE/micropython/
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP clean
         make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP
-        cp $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware.uf2
     - name: Check firmware fits below the littlefs partition
       run: |
         $GITHUB_WORKSPACE/tools/checkFirmwareSize.sh \
           $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.bin \
           $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.bin
-    - uses: marvinpinto/action-automatic-releases@latest
-      name: Release
-      with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        prerelease: true
-        draft: true
-        title: "Pixel Pump Dev Build"
-        automatic_release_tag: latest
-        files: |
-          firmware.uf2
-          firmware-blank.uf2
-
-
-

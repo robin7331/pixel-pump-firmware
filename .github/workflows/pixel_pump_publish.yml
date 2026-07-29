@@ -49,8 +49,9 @@ env:
 
 jobs:
   publish:
-    # Also what keeps pixel_pump_dev.yml out of the feed: it publishes a draft
-    # prerelease on the rolling tag `latest`, which does not start with 'v'.
+    # Also what keeps this repo's dead tags out of the feed — `latest` (the
+    # retired dev workflow's rolling prerelease) and the stray `false` do not
+    # start with 'v', so publishing either is a no-op rather than a bad ingest.
     if: startsWith(github.event.release.tag_name || github.event.inputs.tag, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 15

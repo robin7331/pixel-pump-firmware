@@ -299,7 +299,7 @@ The workflows do exactly the above on an Ubuntu runner:
 
 | Workflow | Trigger | Result |
 |---|---|---|
-| `pixel_pump_dev.yml` | push / PR to `dev` | draft prerelease tagged `latest` |
+| `local.yml` | every push, any branch | builds and checks; produces nothing |
 | `pixel_pump_main.yml` | `v*` tag | draft release |
 | `pixel_pump_publish.yml` | publishing a release | pushes `firmware.uf2` to the website feed |
 
@@ -347,7 +347,8 @@ and runs in CI on every build.
 
 ## Contributing
 
-Fork the repo, work the way described above, and open a pull request against `dev`. Development
-builds are cut from `dev`; releases are tagged `v*` off `main`.
+Fork the repo, work the way described above, and open a pull request against `main` — the only
+long-lived branch. Every push is built and checked; releases are tagged `v*` off `main`, reviewed as
+a draft, and published by hand.
 
 Happy hacking!

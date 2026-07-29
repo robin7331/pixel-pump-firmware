@@ -350,15 +350,29 @@ board-factory's `docs/website-pixel-pump-firmware-endpoint.md`. What is not obvi
   they are what makes publishing anything unexpected a no-op rather than a bad ingest.
 - **There is one long-lived branch, `main`, and no prerelease channel.** The `dev` branch and
   `pixel_pump_dev.yml`'s rolling `latest` draft prerelease were both retired on 2026-07-29 to match
-  PP2, which never had either. Nothing replaced that workflow, and nothing should: **there is no CI
-  before a tag, by design.** `pixel_pump_main.yml` already runs both guards — `pump_check.py static`
-  and `checkFirmwareSize.sh` — and it runs them before the draft release exists, which is the only
-  moment that matters. Builds are native in both repos (README: "no Docker, no containers"), so the
-  size check is something you run locally as you go — PP2 dropped its Act/Docker path the same day,
-  so neither repo has a container build to fall back on. Beta/dev distribution was deferred, not
-  designed away: the wire can
-  already say "dev build" (`Flags.DEV_BUILD`) but not *which* dev build, since the three version bytes
-  are the last tag. That is the real blocker, and it is firmware-side, not website-side.
+  PP2, which never had either. Beta/dev *distribution* stays deferred rather than designed away: the
+  wire can already say "dev build" (`Flags.DEV_BUILD`) but not *which* dev build, since the three
+  version bytes are the last tag. That is the real blocker, and it is firmware-side, not
+  website-side.
+- **`pixel_pump_build.yml` is the pre-tag build, and it is deliberately not a release.** Added
+  2026-07-29, after a few hours in which nothing built before a tag at all. That gap was the problem:
+  a tag is the only heavy gesture in this repo — it creates a draft and arms `pixel_pump_publish.yml`
+  — and it was the only way to get a UF2 off a runner, so "does this commit flash and run?" cost a
+  release candidate. The workflow runs on pushes to `main`, PRs into `main` and `workflow_dispatch`,
+  and uploads both UF2s as a run artifact (30 days). It creates no tag, no release and no draft, so
+  it can never reach the website feed. Two things follow that are worth keeping:
+  - **It carries the same two guards as the tag build** — `pump_check.py static` and
+    `checkFirmwareSize.sh` — which is the second reason it exists. Between the `dev` branch going
+    away and this landing, both first ran at release time. Builds are native in both repos (README:
+    "no Docker, no containers"; PP2 dropped its Act/Docker path on 2026-07-29), so running the size
+    check locally as you go is still the first line — CI is the backstop, not a substitute.
+  - **Its images are self-identifying, and that is load-bearing.** `generateVersionFile.py` describes
+    an untagged commit as `v2.0.0-3-gabc1234`, which `parse_version()` reads as `(2, 0, 0)` with
+    `dev = True`. So an artifact UF2 announces itself as a dev build over USB and cannot be confused
+    with the release of the tag it descends from — which is exactly the ambiguity that makes a
+    prerelease *channel* still unshippable. Do not "fix" the version file to drop the suffix.
+  - PP2 carries the same workflow under the same name, minus the `pump_check.py static` step (no
+    counterpart there). Same standing arrangement as the other two: fix one, carry it across.
 - **A `release: published` event runs the workflow file from the tag's commit, not from `main`.** So a
   fix landed after a failed publish cannot re-run that publish; `workflow_dispatch` with the tag is the
   recovery path, and it is why that trigger exists. By the same rule a tag cut before the workflow

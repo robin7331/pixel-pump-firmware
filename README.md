@@ -304,13 +304,22 @@ The workflows do exactly the above on an Ubuntu runner:
 
 | Workflow | Trigger | Result |
 |---|---|---|
+| `pixel_pump_build.yml` | push to `main`, PRs into `main`, manual | both UF2s as a downloadable run artifact |
 | `pixel_pump_main.yml` | `v*` tag | draft release |
 | `pixel_pump_publish.yml` | publishing a release | pushes `firmware.uf2` to the website feed |
 
-There is no CI before a tag — you build natively as you work, so the checks that matter run where
-you'd hit them first anyway. `pixel_pump_main.yml` runs `tools/pump_check.py static` before building. It needs no pump and no dependencies — it
-reads `src/` and fails if the default mapping table has drifted from what the hardware checks expect,
-so that turns up on a push rather than the next time someone plugs a pump in.
+`pixel_pump_build.yml` is how you get a testable image without cutting a tag. Its artifact — a zip of
+`firmware.uf2` and `firmware-blank.uf2`, kept 30 days — hangs off the run's summary page. Nothing
+consumes it; it's there for you to flash. Because the build is untagged, `git describe` returns
+something like `v2.0.0-3-gabc1234` and `version.py` lands `dev = True`, so the pump reports itself as
+a dev build over USB and can't be mistaken for a release. Use **Run workflow** on the Actions tab to
+build any branch on demand.
+
+Both `pixel_pump_build.yml` and `pixel_pump_main.yml` run `tools/pump_check.py static` before
+building. It needs no pump and no dependencies — it reads `src/` and fails if the default mapping
+table has drifted from what the hardware checks expect, so that turns up on a push rather than the
+next time someone plugs a pump in. Both also run `checkFirmwareSize.sh` as a hard failure. You still
+build natively as you work; CI is the backstop, not the first place you'd hit either check.
 
 Releases are a two-step gesture, and the gate is yours: a `v*` tag builds and leaves a **draft**, so
 nothing is public until you review it and hit Publish. That click is what fires `pixel_pump_publish.yml`,

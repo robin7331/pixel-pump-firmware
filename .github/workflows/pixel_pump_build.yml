@@ -1,0 +1,89 @@
+# build: a testable UF2 without cutting a tag.
+#
+# pixel_pump_main.yml fires on `v*` only, so before this existed the sole way to
+# get a built image off a runner was to tag — which also creates a draft release
+# and arms pixel_pump_publish.yml. That is too heavy a gesture for "does this
+# commit flash and run?". This workflow does the same build and uploads both
+# UF2s as run artifacts: no tag, no release, nothing reaches the website feed.
+#
+# It also puts the two guards back in front of a tag. checkFirmwareSize.sh is
+# the only thing standing between an oversized image and littlefs (see the
+# script's own header), and pump_check.py static catches the default mapping
+# table drifting from what the hardware checks expect. Both ran on every push
+# until the dev branch was retired on 2026-07-29; since then they first ran at
+# release time, which is late to learn either.
+#
+# Artifacts are per-run and expire; the release assets on a `v*` tag remain the
+# durable copy. An untagged build describes as e.g. v2.0.0-3-gabc1234, so
+# version.py lands `dev = True` and the pump says so over USB — these images are
+# self-identifying and cannot be mistaken for a release on the wire.
+#
+# PP2 carries the same workflow under the same name. Keep the two in step.
+
+name: Pixel Pump Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: actions/checkout@v4
+      with:
+        repository: micropython/micropython
+        ref: 'v1.28.0'
+        path: "./micropython"
+    - name: Check the source expectations still hold
+      run: python3 $GITHUB_WORKSPACE/tools/pump_check.py static
+    - name: Update apt-get
+      run: sudo apt-get update
+    - name: Install packages
+      run: sudo apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential cmake git python3 -y
+    - name: Generate Version File
+      run: |
+        python3 $GITHUB_WORKSPACE/tools/generateVersionFile.py --output $GITHUB_WORKSPACE/src/pixel_pump/version.py --repo $GITHUB_WORKSPACE
+    - name: Build mpy-cross
+      run: |
+        cd $GITHUB_WORKSPACE/micropython/
+        make -C mpy-cross
+    - name: Build ports/rp2 submodules
+      run: |
+        cd $GITHUB_WORKSPACE/micropython/
+        make -C ports/rp2 submodules
+    - name: Build Empty Pixel Pump firmware
+      run: |
+        cd $GITHUB_WORKSPACE/micropython/
+        make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP BOARD_VARIANT=EMPTY
+        cp $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.uf2 $GITHUB_WORKSPACE/firmware-blank.uf2
+    - name: Build Pixel Pump Firmware
+      run: |
+        cd $GITHUB_WORKSPACE/micropython/
+        make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP clean
+        make -C ports/rp2 BOARD_DIR=$GITHUB_WORKSPACE/boards/PIXEL_PUMP
+        cp $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.uf2 $GITHUB_WORKSPACE/firmware.uf2
+    - name: Check firmware fits below the littlefs partition
+      run: |
+        $GITHUB_WORKSPACE/tools/checkFirmwareSize.sh \
+          $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.bin \
+          $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.bin
+    # Downloads as a zip holding both images. Nothing else consumes this — it is
+    # for a human to flash and try.
+    - uses: actions/upload-artifact@v4
+      name: Upload UF2 artifacts
+      with:
+        name: pixel-pump-firmware-${{ github.sha }}
+        path: |
+          firmware.uf2
+          firmware-blank.uf2
+        if-no-files-found: error
+        retention-days: 30

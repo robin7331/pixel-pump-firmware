@@ -65,7 +65,9 @@ update.
 
 The firmware initializes a composite HID setup:
 
-- HID Keyboard interface
+- HID Keyboard interface — **[v2]** present only while the persisted
+  `keyboard_enabled` setting is on (see below); legacy firmware always
+  presents it
 - Vendor-defined HID interface (`Pixel Pump Vendor HID`) — the host transport
 
 Vendor HID report descriptor:
@@ -77,6 +79,41 @@ Practical host notes (hidapi):
 - Reads may include a leading report ID byte; strip it if present
 - Device selection scoring: usage page `0xFF00`, usage `0x01` (the daemon
   additionally prefers interface number > 0)
+
+### [v2] `keyboard_enabled` setting
+
+Whether the keyboard interface is registered at enumeration is a persisted
+device setting (`settings.json`):
+
+| Firmware | Default | Rationale |
+|---|---|---|
+| Pixel Pump 2 | off | Board Factory is the desktop client; a fresh unit is a clean vendor-HID device |
+| Pixel Pump 1 | on | aux-pedal keystrokes are shipped behaviour; an update must not remove them |
+
+macOS opens the Keyboard Setup Assistant for any device exposing a keyboard
+top-level collection whose identity it hasn't cached; not presenting one is
+the only device-side way to avoid the dialog (hardware-verified 2026-07-28 —
+`bCountryCode` does not drive it). With the setting off:
+
+- no keyboard interface appears in the configuration descriptor; the vendor
+  interface is unaffected, but its interface number shifts — one more reason
+  hosts must select by usage page/usage, never by index
+- `SEND_KEY` mapping actions are silent no-ops; the mapping table itself is
+  untouched, so turning the setting back on restores the default iBOM keys
+  without reconfiguration
+- the `keyboard_only` connection state is unreachable
+
+The setting rides the CDC line protocol, not vendor HID (the v2 command
+vocabulary is frozen):
+
+    settings:set_keyboard_enabled:0|1
+
+The device persists the value, replies `keyboard_enabled:0|1` on the same
+serial port, and applies it at the next boot — it changes enumeration, so it
+cannot take effect live. On PP1 this is one more command in the legacy stdin
+protocol; PP2 introduces a minimal CDC line protocol carrying only this
+command. Tracking: robin7331/pixel-pump-two-firmware#6 (PP2),
+robin7331/pixel-pump-firmware#33 (PP1).
 
 ## Frame format (8 bytes)
 
@@ -219,7 +256,8 @@ passively track firmware version and model from any heartbeat.
 ## Connection state model (firmware)
 
 - `no_data`: neither keyboard nor vendor path available
-- `keyboard_only`: keyboard HID open, vendor not active
+- `keyboard_only`: keyboard HID open, vendor not active (unreachable while
+  `keyboard_enabled` is off)
 - `vendor_hid`: vendor host active (host RX within timeout)
 
 `vendor_open` (interface opened) and `vendor_active` (recent host RX) are
@@ -508,6 +546,8 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
   mapping model with STANDALONE/CONNECTED slots, `MAPPING` message type,
   mapping commands, error codes 3–6; publish-all rule; factory reset gesture;
   PP2 aux pedal forwards when connected; PP2 moves to its own PID
-  (`0x1062` — PP1 keeps `0x1061`).
+  (`0x1062` — PP1 keeps `0x1061`); persisted `keyboard_enabled` setting
+  deciding whether the keyboard interface enumerates (PP2 default off, PP1
+  default on).
 - **v1**: 8-byte frames, events, heartbeats with version reporting,
   `GET_VERSION`, `ENTER_BOOTLOADER`.

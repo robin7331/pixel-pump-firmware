@@ -576,8 +576,8 @@ it found. Only one pump may be connected at a time until PP2 moves.
   or the tool stops finding already-flashed prototypes: `boards/PIXEL_PUMP/mpconfigboard.h`,
   `tools/usb-coms/main.py` (`--pid` default), `tools/usb-coms/README.md` ×2, `docs/usb-communication.md`
   ×2, `CLAUDE.md`.
-- `0x1062` is **provisional** until Raspberry Pi confirms the assignment — picking one unilaterally
-  from their VID space risks colliding with another licensee.
+- `0x1062` is **registered** with Raspberry Pi (raspberrypi/usb-pid#44, 2026-07-28) — picking one
+  unilaterally from their VID space would have risked colliding with another licensee.
 - Distinct PIDs do not make `MODEL_ID` redundant: the PID identifies the product to the OS, while
   `MODEL_ID` in the heartbeat tells the daemon which protocol dialect and mapping table apply. Keep
   both, and let the daemon treat a `MODEL_ID` that disagrees with the PID as an error.

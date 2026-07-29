@@ -28,7 +28,7 @@ USB identity — Manufacturer `Robins Tools`, Vendor ID `0x2E8A`:
 |---|---|---|
 | Pixel Pump 1 (all firmware) | `0x1061` | `Pixel Pump` |
 | Pixel Pump 2, legacy (v1) firmware | `0x1061` | `Pixel Pump 2` |
-| Pixel Pump 2, v2 firmware **[v2]** | `0x1062` *(provisional — final PID TBD)* | `Pixel Pump 2` |
+| Pixel Pump 2, v2 firmware **[v2]** | `0x1062` | `Pixel Pump 2` |
 
 USB serial number = the MCU's unique flash ID (stable per physical unit;
 hosts use it to remember per-device configuration).
@@ -465,10 +465,9 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
 
 ## Integration checklist for hosts
 
-1. Open HID devices matching VID `0x2E8A` with PID `0x1061` **or** `0x1062`
-   *(provisional)*, select the vendor interface (usage page `0xFF00`, usage
-   `0x01`); normalize reports to 8 bytes, stripping a leading `0x00` report
-   ID.
+1. Open HID devices matching VID `0x2E8A` with PID `0x1061` **or** `0x1062`,
+   select the vendor interface (usage page `0xFF00`, usage `0x01`); normalize
+   reports to 8 bytes, stripping a leading `0x00` report ID.
 2. Send host heartbeat `PING` (~400 ms; must stay < 1200 ms).
 3. Send `GET_INFO` (and `GET_VERSION`) on connect; also passively read model
    + version from heartbeats (`HAS_MODEL`/`HAS_VERSION` flags — always mask
@@ -509,6 +508,6 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
   mapping model with STANDALONE/CONNECTED slots, `MAPPING` message type,
   mapping commands, error codes 3–6; publish-all rule; factory reset gesture;
   PP2 aux pedal forwards when connected; PP2 moves to its own PID
-  (provisional `0x1062`, final TBD — PP1 keeps `0x1061`).
+  (`0x1062` — PP1 keeps `0x1061`).
 - **v1**: 8-byte frames, events, heartbeats with version reporting,
   `GET_VERSION`, `ENTER_BOOTLOADER`.

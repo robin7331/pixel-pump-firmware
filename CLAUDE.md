@@ -342,8 +342,8 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
   `0x2E8A` is Raspberry Pi's vendor ID; `0x1061` is the product ID they assigned for the Pixel Pump 1
   and **must not change** — hosts already in the field discover the pump by it. PP2 moves to `0x1062`
   so the two are distinguishable at enumeration; until then both share `0x1061` and a host cannot tell
-  them apart before opening the vendor interface. `0x1062` is provisional until Raspberry Pi confirms
-  the assignment.
+  them apart before opening the vendor interface. `0x1062` is registered with Raspberry Pi
+  (raspberrypi/usb-pid#44).
 - The CPU is deliberately underclocked to 96 MHz, and QSPI pads are set to 2 mA / slow slew in
   `pixel_pump.py` — both are EMI/noise measures. The large register-address constant block at the top
   of that file is mostly unused; only `SetPadQSPI` reads from it.

@@ -23,23 +23,20 @@ Two UF2s come out of every build:
 > `dev` and a release.
 > Read `docs/plans/issue-30-micropython-1.28-protocol-v2.md` before touching USB code.
 >
-> Phases 2, 3 and 4 are all verified on a physical pump (2026-07-28), wire checks included —
-> `tools/phase3_wire_check.py` and `tools/phase4_wire_check.py` both pass end to end. Of the two narrow
-> gaps the Phase 4 gate left, `COMMIT_MAPPINGS` persistence closed on 2026-07-29: `phase4_wire_check.py`
-> gained check H, which reads `settings.json` over CDC between the commit and the reset and so also
-> proves SET_MAPPING leaves flash alone. One gap remains, not blocking — the aux pedal's keystroke is
-> still confirmed only as far as the mapping table reporting it; `issue33_acceptance.py` check F closes
-> it, and wants a pedal tap. See the plan doc's Phase 4 gate.
+> Phases 2, 3 and 4 are verified on a physical pump, re-run end to end on 2026-07-29 against the build
+> that carries issue #33. **The Phase 4 gate is clean** — both narrow gaps it left are closed:
+> `COMMIT_MAPPINGS` persistence by `phase4_wire_check.py`'s check H, which reads `settings.json` over
+> CDC between the commit and the reset (and so also proves SET_MAPPING leaves flash alone), and the aux
+> pedal's keystroke by `issue33_acceptance.py`'s check F, which reads the keystroke off the terminal.
 >
 > Issue #33 (`keyboard_enabled`) also landed on this branch, after the #30 gate closed, and is
-> **verified on the dev pump as of 2026-07-29** — `tools/issue33_acceptance.py --auto` passes all four
-> of its unattended checks. `ioreg -c IOHIDDevice` shows no keyboard collection with the setting off,
+> **verified on the dev pump as of 2026-07-29** — all six of `tools/issue33_acceptance.py`'s checks
+> pass, pedal taps included. `ioreg -c IOHIDDevice` shows no keyboard collection with the setting off,
 > which was the acceptance item; the vendor interface, the mapping table and CDC all survive without
-> it; and turning it back on restores the keyboard with the configured keys unchanged. Three items
-> stay open, none of them a firmware question: the Keyboard Setup Assistant staying away on a Mac that
-> has **never** enumerated this pump (the dialog is cache-driven, so the one Mac here cannot show it),
-> and checks D and F, which both want someone to tap the aux pedal. F is worth running — it is also
-> the only thing that would close the Phase 4 keystroke gap below.
+> it; the aux pedal neither types nor wedges the firmware while it is off; and turning it back on
+> restores the keyboard with the configured keys unchanged. One item stays open and is not a firmware
+> question: the Keyboard Setup Assistant staying away on a Mac that has **never** enumerated this pump.
+> The dialog is cache-driven, so the one Mac here cannot show it whatever the firmware does.
 
 > Successor project: `../pixel-pump-two-firmware` (RP2354A, MicroPython v1.28.0, async). Different
 > architecture — don't copy patterns between them without checking. Two deliberate exceptions, kept

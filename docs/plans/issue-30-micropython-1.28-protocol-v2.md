@@ -272,12 +272,12 @@ press time — publish-all only emits while it is, so a missing frame is now rep
 rather than as a failed mapping. **Lesson for any future interactive check on this device: a blocking
 prompt is a disconnection.**
 
-Two narrow gaps remained, neither blocking. One is now closed:
+Two narrow gaps remained, neither blocking. **Both closed 2026-07-29** — this gate is now clean:
 
-- [ ] the aux pedal actually *typing* the configured key (check C proves the read path reports it,
-      not that the keystroke lands). Closable by `tools/issue33_acceptance.py` check F, which reads
-      the keystroke off the terminal in raw mode — it needs a pedal tap, so it has not been run
-- [x] `COMMIT_MAPPINGS` persistence proven independently — **closed 2026-07-29** by check H, added to
+- [x] the aux pedal actually *typing* the configured key — **closed** by `tools/issue33_acceptance.py`
+      check F, which reads the keystroke off the terminal in raw mode after a pedal tap. Check C only
+      ever proved the read path *reports* the keycode; F is the first evidence it lands
+- [x] `COMMIT_MAPPINGS` persistence proven independently — **closed** by check H, added to
       `phase4_wire_check.py` for exactly this. Check G's override was committed and then wiped by the
       reset, which was equally consistent with the commit never having reached flash: the evidence
       was destroyed by the thing testing it. H reads `settings.json` over CDC *between* the commit

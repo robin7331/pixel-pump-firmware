@@ -6,8 +6,10 @@ on:
       - "v*"
 
 jobs:
-  dev-build:
+  release-build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
     - uses: actions/checkout@v4
       with:
@@ -50,16 +52,19 @@ jobs:
         $GITHUB_WORKSPACE/tools/checkFirmwareSize.sh \
           $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP-EMPTY/firmware.bin \
           $GITHUB_WORKSPACE/micropython/ports/rp2/build-PIXEL_PUMP/firmware.bin
-    - uses: marvinpinto/action-automatic-releases@latest
+    # Creates the DRAFT release publishing pixel_pump_publish.yml keys off.
+    # Same action and inputs as PP2's workflow of the same name — the previous
+    # marvinpinto/action-automatic-releases is archived upstream and declares
+    # node12, so it had not been exercised here since v1.0.1 in 2023.
+    - uses: softprops/action-gh-release@v2
       name: Release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
         prerelease: false
         draft: true
-        title: "Pixel Pump Release Build"
+        name: "Pixel Pump Release Build"
+        make_latest: "true"
         files: |
           firmware.uf2
           firmware-blank.uf2
-
-
-

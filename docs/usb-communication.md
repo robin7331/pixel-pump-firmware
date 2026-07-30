@@ -13,9 +13,9 @@ is closed, and all future control features are host-side intents.
 
 | Codebase | Status | Tracking |
 |---|---|---|
-| Pixel Pump 2 firmware (this repo) | v2 implemented and hardware-verified; releases through v0.1.2 (2026-07-29) were test-only and never distributed. Unreleased: the appearance addendum (implemented, not yet bench-verified) and the VID move to `0x1137` (issue #9) — the VID move must not ship before hosts discover on the new identity | robin7331/pixel-pump-two-firmware#4, #7, #9 |
+| Pixel Pump 2 firmware (this repo) | v2 implemented and hardware-verified; releases through v0.1.2 (2026-07-29) were test-only and never distributed. Unreleased: the appearance addendum (implemented, not yet bench-verified) and the VID move to `0x1137` (issue #9) — ✅ its host gate is CLEAR since 2026-07-30, the Board Factory daemon discovers on the new identity | robin7331/pixel-pump-two-firmware#4, #7, #9 |
 | Pixel Pump 1 firmware | v2 released as v2.0.0 (2026-07-29) from `main` and served by the update feed (issue #30 complete); units in the field run legacy v1 (no vendor HID at all — stdin line protocol only) until they are updated. Appearance addendum implemented, not yet bench-verified | robin7331/pixel-pump-firmware#30, #35 |
-| Board Factory daemon (`board-factory/rust/pixel-pump-daemon`) | v2 + multi-PID discovery shipped (#4 closed 2026-07-29); identity-pair discovery for the `0x1137` VID move not started | robin7331/board-factory#4, #11 |
+| Board Factory daemon (`board-factory/rust/pixel-pump-daemon`) | v2 shipped (#4 closed 2026-07-29); **identity-pair discovery shipped 2026-07-30** (#11 closed, `bdc6c3b`) — it matches a SET of `(VID, PID)` pairs, `0x1137:0x1062` + `0x2E8A:0x1061`, never a VID crossed with a PID list. Not yet walked against a real pump on the new VID | robin7331/board-factory#4, #11 |
 
 Sections that only exist in v2 are marked **[v2]**. Everything else shipped
 with v1 and is unchanged.
@@ -51,9 +51,12 @@ ID tells the host which dialect and mapping table apply. A host seeing them
 disagree (e.g. PID `0x1062` reporting model `1`) should treat that as an
 error, not pick a winner.
 Sequencing constraint: an identity flip must not ship before hosts discover
-on the new identity, or updated pumps disappear from their hosts. The PID
-flip cleared this gate (robin7331/board-factory#4, closed 2026-07-29); the
-VID move is gated the same way (robin7331/board-factory#11).
+on the new identity, or updated pumps disappear from their hosts. **Both
+flips have now cleared this gate** — the PID flip in
+robin7331/board-factory#4 (closed 2026-07-29), the VID move in
+robin7331/board-factory#11 (closed 2026-07-30, which replaced that host's
+`(one VID × PID list)` with a set of identity pairs). The constraint stands
+for any future flip.
 
 **[v2]** Model IDs distinguish the generations on the wire:
 
@@ -591,7 +594,7 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
 
 | Host | Firmware | Result |
 |---|---|---|
-| v1 host (shipping daemon) | v2 firmware | Wire-compatible: version byte, model byte, `MAPPING` frames, and flag `0x08` are ignored/passed through (verified against `protocol.rs`/`usb_hid.rs`). **Caveat:** identity flips change *discovery*, never the wire — a single-PID host will not find a v2 PP2 on its new PID, and a `0x2E8A`-only host will not find a pump on VID `0x1137`; host discovery must ship before/with each flip (robin7331/board-factory#4, #11) |
+| v1 host (shipping daemon) | v2 firmware | Wire-compatible: version byte, model byte, `MAPPING` frames, and flag `0x08` are ignored/passed through (verified against `protocol.rs`/`usb_hid.rs`). **Caveat:** identity flips change *discovery*, never the wire — a single-PID host will not find a v2 PP2 on its new PID, and a `0x2E8A`-only host will not find a pump on VID `0x1137`; host discovery must ship before/with each flip — both flips cleared that gate (robin7331/board-factory#4 closed 2026-07-29, #11 closed 2026-07-30) |
 | v2 host | v1 PP2 firmware | Works, degraded: no model (assume PP2), mapping commands → `UNKNOWN_COMMAND` |
 | v2 host | legacy PP1 firmware | No vendor HID interface — keyboard-only device; prompt a firmware update |
 | v2 host | v2 firmware | Full feature set |

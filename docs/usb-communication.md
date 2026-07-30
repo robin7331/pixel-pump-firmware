@@ -13,38 +13,47 @@ is closed, and all future control features are host-side intents.
 
 | Codebase | Status | Tracking |
 |---|---|---|
-| Pixel Pump 2 firmware (this repo) | v2 implemented and hardware-verified (2026-07-28); unreleased — the PID split must not ship before hosts discover on both PIDs. Appearance addendum implemented, not yet bench-verified | robin7331/pixel-pump-two-firmware#4, #7 |
+| Pixel Pump 2 firmware (this repo) | v2 implemented and hardware-verified; releases through v0.1.2 (2026-07-29) were test-only and never distributed. Unreleased: the appearance addendum (implemented, not yet bench-verified) and the VID move to `0x1137` (issue #9) — the VID move must not ship before hosts discover on the new identity | robin7331/pixel-pump-two-firmware#4, #7, #9 |
 | Pixel Pump 1 firmware | v2 released as v2.0.0 (2026-07-29) from `main` and served by the update feed (issue #30 complete); units in the field run legacy v1 (no vendor HID at all — stdin line protocol only) until they are updated. Appearance addendum implemented, not yet bench-verified | robin7331/pixel-pump-firmware#30, #35 |
-| Board Factory daemon (`board-factory/rust/pixel-pump-daemon`) | v1 implemented; v2 + multi-PID discovery not started | robin7331/board-factory#4 |
+| Board Factory daemon (`board-factory/rust/pixel-pump-daemon`) | v2 + multi-PID discovery shipped (#4 closed 2026-07-29); identity-pair discovery for the `0x1137` VID move not started | robin7331/board-factory#4, #11 |
 
 Sections that only exist in v2 are marked **[v2]**. Everything else shipped
 with v1 and is unchanged.
 
 ## Devices & model IDs
 
-USB identity — Manufacturer `Robins Tools`, Vendor ID `0x2E8A`:
+USB identity — Manufacturer `Robins Tools`:
 
-| Device / firmware | PID | Product string |
-|---|---|---|
-| Pixel Pump 1 (all firmware) | `0x1061` | `Pixel Pump` |
-| Pixel Pump 2, legacy (v1) firmware | `0x1061` | `Pixel Pump 2` |
-| Pixel Pump 2, v2 firmware **[v2]** | `0x1062` | `Pixel Pump 2` |
+| Device / firmware | VID | PID | Product string |
+|---|---|---|---|
+| Pixel Pump 1 (all firmware) | `0x2E8A` | `0x1061` | `Pixel Pump` |
+| Pixel Pump 2, legacy (v1) firmware | `0x2E8A` | `0x1061` | `Pixel Pump 2` |
+| Pixel Pump 2, v2 firmware **[v2]** | `0x1137` | `0x1062` | `Pixel Pump 2` |
+
+`0x2E8A` is Raspberry Pi's VID (PIDs registered through their program);
+`0x1137` is Robins Tools' own VID
+(robin7331/pixel-pump-two-firmware#9). Test releases of the v2 firmware
+through v0.1.2 enumerated as `0x2E8A:0x1062`; none were distributed, so
+hosts need not match that identity.
 
 USB serial number = the MCU's unique flash ID (stable per physical unit;
 hosts use it to remember per-device configuration).
 
-**[v2]** PP2 moves to its own PID with the v2 firmware so the generations are
-distinguishable at enumeration. Note the PID is a *firmware* property, not a
-hardware one: PP2 field units still on legacy firmware keep `0x1061` forever,
-so `0x1061` remains ambiguous (legacy PP2 or PP1). Hosts must match **both
-PIDs** and treat the in-protocol model ID as the authoritative discriminator.
-The two are not redundant: the PID identifies the product to the OS, the
-model ID tells the host which dialect and mapping table apply. A host seeing
-them disagree (e.g. `0x1062` reporting model `1`) should treat that as an
+**[v2]** PP2 moves to its own PID with the v2 firmware so the generations
+are distinguishable at enumeration, and then to Robins Tools' own VID
+`0x1137` (robin7331/pixel-pump-two-firmware#9). Note the identity is a
+*firmware* property, not a hardware one: PP2 field units still on legacy
+firmware keep `0x2E8A:0x1061` forever, so that identity remains ambiguous
+(legacy PP2 or PP1). Hosts must match **both identities in the table** and
+treat the in-protocol model ID as the authoritative discriminator. The two
+are not redundant: the VID:PID identifies the product to the OS, the model
+ID tells the host which dialect and mapping table apply. A host seeing them
+disagree (e.g. PID `0x1062` reporting model `1`) should treat that as an
 error, not pick a winner.
-Sequencing constraint: the PP2 PID flip must not ship before hosts discover
-on both PIDs (robin7331/board-factory#4), or updated pumps disappear from a
-single-PID host.
+Sequencing constraint: an identity flip must not ship before hosts discover
+on the new identity, or updated pumps disappear from their hosts. The PID
+flip cleared this gate (robin7331/board-factory#4, closed 2026-07-29); the
+VID move is gated the same way (robin7331/board-factory#11).
 
 **[v2]** Model IDs distinguish the generations on the wire:
 
@@ -582,7 +591,7 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
 
 | Host | Firmware | Result |
 |---|---|---|
-| v1 host (shipping daemon) | v2 firmware | Wire-compatible: version byte, model byte, `MAPPING` frames, and flag `0x08` are ignored/passed through (verified against `protocol.rs`/`usb_hid.rs`). **Caveat:** a single-PID host (`0x1061` only) will not *discover* a v2 PP2 on its new PID — multi-PID discovery must ship before/with the PP2 PID flip |
+| v1 host (shipping daemon) | v2 firmware | Wire-compatible: version byte, model byte, `MAPPING` frames, and flag `0x08` are ignored/passed through (verified against `protocol.rs`/`usb_hid.rs`). **Caveat:** identity flips change *discovery*, never the wire — a single-PID host will not find a v2 PP2 on its new PID, and a `0x2E8A`-only host will not find a pump on VID `0x1137`; host discovery must ship before/with each flip (robin7331/board-factory#4, #11) |
 | v2 host | v1 PP2 firmware | Works, degraded: no model (assume PP2), mapping commands → `UNKNOWN_COMMAND` |
 | v2 host | legacy PP1 firmware | No vendor HID interface — keyboard-only device; prompt a firmware update |
 | v2 host | v2 firmware | Full feature set |
@@ -590,9 +599,10 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
 
 ## Integration checklist for hosts
 
-1. Open HID devices matching VID `0x2E8A` with PID `0x1061` **or** `0x1062`,
-   select the vendor interface (usage page `0xFF00`, usage `0x01`); normalize
-   reports to 8 bytes, stripping a leading `0x00` report ID.
+1. Open HID devices matching either identity from §Devices & model IDs —
+   `0x1137:0x1062` or `0x2E8A:0x1061` — and select the vendor interface
+   (usage page `0xFF00`, usage `0x01`); normalize reports to 8 bytes,
+   stripping a leading `0x00` report ID.
 2. Send host heartbeat `PING` (~400 ms; must stay < 1200 ms).
 3. Send `GET_INFO` (and `GET_VERSION`) on connect; also passively read model
    + version from heartbeats (`HAS_MODEL`/`HAS_VERSION` flags — always mask
@@ -633,6 +643,12 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
 
 ## Changelog
 
+- **v2, VID move** (2026-07-30, robin7331/pixel-pump-two-firmware#9): PP2 v2
+  firmware moves from Raspberry Pi's VID `0x2E8A` to Robins Tools' own VID
+  `0x1137`; the PID stays `0x1062` and nothing on the wire changes. Test
+  releases through v0.1.2 enumerated as `0x2E8A:0x1062` but were never
+  distributed, so hosts match two identities. Release gated on host
+  discovery (robin7331/board-factory#11).
 - **v2, appearance addendum** (spec 2026-07-29,
   robin7331/pixel-pump-two-firmware#7): `FORWARD`'s previously unused param
   byte declares a control appearance — `(animation << 4) | color`, rendered

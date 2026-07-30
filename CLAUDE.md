@@ -1,6 +1,7 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Only ever operate in this repo only unless instructed otherwise.
 
 ## Project Overview
 
@@ -38,7 +39,7 @@ Three of those are worth stating up front because they are cheap to trip and exp
   640 KiB firmware / 1408 KiB littlefs, but `memmap_mp_rp2040.ld` is handed the *whole* 2 MB — an
   oversized image links silently and then overwrites the filesystem, `settings.json` included, on
   first boot. The boundary cannot move without wiping every unit in the field, so this check is the
-  only guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 393,772 B full, ~60 % of
+  only guard. CI runs it as a hard failure. Current usage: 346,088 B blank / 393,996 B full, ~60 % of
   ceiling.
 - **The MicroPython checkout already exists at `./micropython`** — v1.28.0, submodules fetched, both
   variants built, ~450 MB, ignored via `.gitignore`. Do not re-clone it; the disk runs close to full.
@@ -102,6 +103,10 @@ Conventions worth preserving:
 - Imports of sibling states are done **inside methods**, not at module top — this breaks the circular
   imports between states. Keep it that way.
 - `set_last_state()` re-instantiates the previous state class; it does not restore the old instance.
+- **States paint buttons unconditionally and must keep doing so.** A state never asks whether the
+  host owns a control — `Button` swallows the paint and replays it when the host lets go (issue #38,
+  "one button, one LED owner" below). Adding a host-ownership check to a state would duplicate that
+  arbitration and get it subtly wrong.
 
 ### Key patterns
 
@@ -111,7 +116,19 @@ Conventions worth preserving:
   TOUCH, TAPPED (50–300 ms) and LONG_PRESS (>750 ms) — the same gesture set and thresholds as
   `IOEventSource`, and on a quick release TAPPED precedes TOUCH_UP. One button drives exactly one
   pin; the `secondary_switch_pin` OR went away when the trigger and the pedal became separate
-  controls.
+  controls. It also arbitrates **who owns the LEDs** — see the remote layer below.
+- **One button, one LED owner** (`button.py`, issue #38): between `begin_remote()` and `end_remote()`
+  the host owns the button, and `set_color` / `clear_color` / `pulsate` / `stop_pulsating` record
+  into `remote_paint` instead of painting. `override=True` paints anyway, and exactly three callers
+  are entitled to it: `MappingEngine._render_appearance` (it *is* the host's paint), the pulse
+  ping-pong in `tick()` (it drives whichever layer is live), and `BootloaderState` (the whole panel
+  goes white to say the device is leaving). The guard lives here, not at the ~30 `set_color` call
+  sites in `states/`, because the bug it fixes is that *any* state painting a host-owned button wins
+  permanently — a per-call-site check is one forgotten line away from coming back, and a repaint loop
+  would fight the state machine every tick.
+  The record is **live, not a snapshot**: paints that arrive while the host owns the button keep
+  updating it, so `end_remote()` shows the mode the pump is actually in. Restoring a snapshot taken
+  when the host took over would light the button for a state left long ago.
 - **`IOEventSource`** (`controls/io_event_source.py`): raw GPIO → events (ACTIVATE, DEACTIVATE, HOLD,
   TAPPED 50–300 ms, LONG_HOLD >750 ms). Used for both pedals — `foot_pedal` (GPIO6) and
   `secondary_pedal` (GPIO7).
@@ -134,7 +151,7 @@ Conventions worth preserving:
 | `pixel_pump_state_machine.py` | Holds hardware refs + settings, owns current state, maps power mode → PWM duty |
 | `states/` | One file per mode; `state.py` is the no-op base |
 | `ui_renderer.py` | WS2812 driver — inline `@rp2.asm_pio` program + 12-LED frame buffer |
-| `controls/button.py` | Polled switch + two-LED colour animation |
+| `controls/button.py` | Polled switch + two-LED colour animation, and the state-machine/host LED arbitration |
 | `controls/io_event_source.py` | Polled GPIO → event enum |
 | `motor.py` | PWM pump control (10 kHz), 60 s timeout |
 | `valve.py` | Solenoid with optional delayed switching |
@@ -295,8 +312,14 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
   recorded press never drops the pump holder. The refcount then sits at 1 forever, silently killing
   the foot pedal until power-cycle.
 - **Remote-mode LED:** purple at `Brightness.DIMMER` on buttons whose active-slot gestures are all
-  `FORWARD`/`NONE`. Applied on transition, snapshotting and restoring the button's colour and pulsate
-  state; it deliberately does not fight the state machine afterwards.
+  `FORWARD`/`NONE`. Applied on transition — `tick()` early-returns unless the slot, the table
+  revision or `state.suspends_mapping` changed — and then held by `Button`'s remote layer rather than
+  repainted, so the state machine cannot take it back. `_remote_leds` is only change-detection now;
+  the button owns the colour it will return to.
+- **A suspended engine badges nothing.** Entering a settings menu drops every badge and leaving it
+  puts them back, because in a menu the buttons genuinely act the legacy way and the menu paints its
+  own feedback — a badge left up would both lie and swallow that feedback. This is why
+  `suspends_mapping` is part of `tick()`'s early-return key.
 - **Control appearance** (issue #35, spec §Control appearance): `FORWARD`'s param is
   `(animation << 4) | colour`, so a host can badge each forwarded button rather than getting six
   identical purple ones. `decode_appearance()` degrades at *render* time and `is_valid_action()`
@@ -307,9 +330,10 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
     `PRESS` because dispatch cares about the press edge). The appearance is the first non-zero param
     among the `FORWARD` cells in id order, so an implicit zero-param `FORWARD` never masks one a host
     wrote. Don't reuse `GESTURES` here.
-  - **A repaint keeps the *original* snapshot.** `_apply_remote_leds` re-renders when the appearance
-    changes while a button stays remote; restoring the purple badge on the way out instead of the
-    state machine's colour would strand the LED.
+  - **A repaint must not re-take the button.** `_apply_remote_leds` re-renders when the appearance
+    changes while a button stays remote, and calls `_render_appearance` *without* a second
+    `begin_remote()` — that call is a no-op on an already-remote button precisely so a recolour cannot
+    reset the record and strand the LED on the badge.
   - `Colors.AMBER` / `Colors.CYAN` exist only for this palette and carry no device-side meaning,
     unlike BLUE/RED/GREEN/PURPLE. Brightness stays device-owned — the global user setting must keep
     winning, which is why the host picks colour and animation but not brightness.

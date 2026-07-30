@@ -337,6 +337,7 @@ class MappingEngine:
         self._remote_leds = {}
         self._last_slot = None
         self._last_revision = None
+        self._last_suspended = None
 
     # -- slot resolution ----------------------------------------------------
 
@@ -477,31 +478,45 @@ class MappingEngine:
     def tick(self):
         slot = self.active_slot()
         revision = self.table.revision
-        if slot == self._last_slot and revision == self._last_revision:
+        suspended = self.state_machine.state.suspends_mapping
+        if (slot == self._last_slot
+                and revision == self._last_revision
+                and suspended == self._last_suspended):
             return
 
         self._last_slot = slot
         self._last_revision = revision
-        self._apply_remote_leds(slot)
+        self._last_suspended = suspended
+        self._apply_remote_leds(slot, suspended)
 
-    def _apply_remote_leds(self, slot):
+    def _apply_remote_leds(self, slot, suspended):
         for control_id in self.buttons:
             button = self.buttons[control_id]
-            appearance = self._remote_appearance(control_id, slot)
+            # Nothing is host-owned while a settings menu is up: the engine is
+            # suspended, the buttons act the legacy way and the menu paints its
+            # own feedback on them. The badge returns when the menu exits.
+            if suspended:
+                appearance = None
+            else:
+                appearance = self._remote_appearance(control_id, slot)
             current = self._remote_leds.get(control_id, None)
 
             if appearance is None:
                 if current is not None:
                     del self._remote_leds[control_id]
-                    self._restore_button(button, current[1])
+                    button.end_remote()
             elif current is None:
-                self._remote_leds[control_id] = (appearance, self._snapshot(button))
+                self._remote_leds[control_id] = appearance
+                # From here the state machine paints into the button's record
+                # rather than onto the LEDs, so a mode change can no longer
+                # take a host-owned button away from the host (issue #38).
+                button.begin_remote()
                 self._render_appearance(button, appearance)
-            elif appearance != current[0]:
-                # A host recoloured a button that is already remote. Repaint,
-                # but keep the *original* snapshot -- restoring the purple
-                # badge on the way out would strand the state machine's colour.
-                self._remote_leds[control_id] = (appearance, current[1])
+            elif appearance != current:
+                # A host recoloured a button that is already remote. Repaint
+                # only -- begin_remote() has already happened, and the record
+                # underneath keeps tracking the state machine.
+                self._remote_leds[control_id] = appearance
                 self._render_appearance(button, appearance)
 
     def _remote_appearance(self, control_id, slot):
@@ -532,33 +547,19 @@ class MappingEngine:
     def _render_appearance(self, button, appearance):
         # Brightness stays device-owned: the host picks colour and animation,
         # and the user's global brightness setting still multiplies on top.
+        # override, because this *is* the host's paint -- begin_remote() has
+        # already closed the button to everything else.
         animation, color = appearance
-        button.stop_pulsating()
+        button.stop_pulsating(override=True)
         if color == Color.OFF:
-            button.clear_color()
+            button.clear_color(override=True)
             return
         rgb = APPEARANCE_COLORS[color]
         if animation == Animation.PULSE:
-            button.pulsate(rgb, REMOTE_PULSE_BRIGHTNESS, rgb, REMOTE_BRIGHTNESS)
+            button.pulsate(rgb, REMOTE_PULSE_BRIGHTNESS, rgb, REMOTE_BRIGHTNESS,
+                           override=True)
         else:
-            button.set_color(rgb, REMOTE_BRIGHTNESS)
-
-    def _snapshot(self, button):
-        return (
-            button.left_target_color,
-            button.pulsing,
-            button.pulse_from_color,
-            button.pulse_from_brightness,
-            button.pulse_to_color,
-            button.pulse_to_Brightness,
-        )
-
-    def _restore_button(self, button, snapshot):
-        target, pulsing, from_c, from_b, to_c, to_b = snapshot
-        button.stop_pulsating()
-        button.set_color((target[0], target[1], target[2]), target[3])
-        if pulsing:
-            button.pulsate(from_c, from_b, to_c, to_b)
+            button.set_color(rgb, REMOTE_BRIGHTNESS, override=True)
 
 
 def check_factory_reset(table, renderer, pins, hold_ms=FACTORY_RESET_HOLD_MS):

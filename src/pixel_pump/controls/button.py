@@ -33,6 +33,12 @@ class Button:
         self.right_color = (0, 0, 0, 0.0)
         self.left_target_color = self.left_color
         self.right_target_color = self.right_color
+        # While the host owns this button -- mapping.py's remote badge, the
+        # spec's "replacing the state-machine color" -- paints from the state
+        # machine are recorded here instead of shown. One button has one
+        # owner, and the states do not have to know which.
+        self.remote = False
+        self.remote_paint = None
 
     def tick(self):
 
@@ -76,13 +82,16 @@ class Button:
                 self.on_button_event(self, ButtonEvent.TOUCH)
 
         if self.pulsing:
+            # override, because the ping-pong drives whichever layer is live --
+            # while the host owns the button that is the badge's own pulse, and
+            # the recorded state-machine paint must not be overwritten by it.
             # Pulse to?
             if self.pulseDirection == 1:
-                self.set_color(self.pulse_to_color, self.pulse_to_Brightness)
+                self.set_color(self.pulse_to_color, self.pulse_to_Brightness, override=True)
                 if self.is_color_set(source_color=self.pulse_to_color, source_brightness=self.pulse_to_Brightness):
                     self.pulseDirection = 2
             elif self.pulseDirection == 2:
-                self.set_color(self.pulse_from_color, self.pulse_from_brightness)
+                self.set_color(self.pulse_from_color, self.pulse_from_brightness, override=True)
                 if self.is_color_set(source_color=self.pulse_from_color, source_brightness=self.pulse_from_brightness):
                     self.pulseDirection = 1
 
@@ -101,27 +110,35 @@ class Button:
     def __lerpColor(self, current, target):
         return (current[0] + int((target[0] - current[0]) * self.lerp_speed), current[1] + int((target[1] - current[1]) * self.lerp_speed), current[2] + int((target[2] - current[2]) * self.lerp_speed), current[3] + (target[3] - current[3]) * self.lerp_speed)
 
-    def set_color(self, color, brightness, animated=True):
-        if not animated:
-            self.left_target_color = self.left_color = (
-                color[0], color[1], color[2], brightness)
-            self.right_target_color = self.right_color = (
-                color[0], color[1], color[2], brightness)
+    # override=True paints the LEDs even while the host owns the button. Three
+    # callers are entitled to it: the mapping engine rendering the badge (it
+    # *is* the host's paint), the pulse ping-pong above, and the bootloader's
+    # whole-panel takeover. Everything else is state-machine feedback and
+    # yields.
+
+    def set_color(self, color, brightness, animated=True, override=False):
+        if self.remote and not override:
+            self.remote_paint[0] = (color[0], color[1], color[2], brightness)
             return
 
         self.left_target_color = (color[0], color[1], color[2], brightness)
         self.right_target_color = (color[0], color[1], color[2], brightness)
-
-    def clear_color(self, animated=True):
         if not animated:
-            self.left_target_color = self.left_color = (0, 0, 0, 0.0)
-            self.right_target_color = self.right_color = (0, 0, 0, 0.0)
+            self.left_color = self.left_target_color
+            self.right_color = self.right_target_color
+
+    def clear_color(self, animated=True, override=False):
+        self.set_color((0, 0, 0), 0.0, animated, override)
+
+    def pulsate(self, fromColor, fromBrightness, toColor, toBrightness, override=False):
+        if self.remote and not override:
+            self.remote_paint[1] = True
+            self.remote_paint[2] = fromColor
+            self.remote_paint[3] = fromBrightness
+            self.remote_paint[4] = toColor
+            self.remote_paint[5] = toBrightness
             return
 
-        self.left_target_color = (0, 0, 0, 0.0)
-        self.right_target_color = (0, 0, 0, 0.0)
-
-    def pulsate(self, fromColor, fromBrightness, toColor, toBrightness):
         self.pulsing = True
         self.pulseDirection = 1
         self.pulse_from_color = fromColor
@@ -129,8 +146,50 @@ class Button:
         self.pulse_to_color = toColor
         self.pulse_to_Brightness = toBrightness
 
-    def stop_pulsating(self):
+    def stop_pulsating(self, override=False):
+        if self.remote and not override:
+            self.remote_paint[1] = False
+            return
+
         self.pulsing = False
+
+    def begin_remote(self):
+        """Hand the LEDs to the host; the state machine paints into the record.
+
+        Safe to call on a button that is already remote -- the record must not
+        be reset, or a repaint (the host recolouring a button that stays
+        host-owned) would strand whatever the state machine asked for since.
+        """
+        if self.remote:
+            return
+
+        self.remote_paint = [
+            self.left_target_color,
+            self.pulsing,
+            self.pulse_from_color,
+            self.pulse_from_brightness,
+            self.pulse_to_color,
+            self.pulse_to_Brightness,
+        ]
+        self.remote = True
+
+    def end_remote(self):
+        """Take the LEDs back, showing what the state machine last asked for.
+
+        The record is live rather than a snapshot taken when the host took
+        over, so a pump that changed mode while badged comes back to the mode
+        it is actually in.
+        """
+        if not self.remote:
+            return
+
+        target, pulsing, from_c, from_b, to_c, to_b = self.remote_paint
+        self.remote = False
+        self.remote_paint = None
+        self.stop_pulsating()
+        self.set_color((target[0], target[1], target[2]), target[3])
+        if pulsing:
+            self.pulsate(from_c, from_b, to_c, to_b)
 
     def is_color_set(self, source_color, source_brightness, colorMargin=10, brightnessMargin=0.01):
         for i in range(2):

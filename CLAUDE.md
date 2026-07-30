@@ -435,11 +435,21 @@ the website repo, and the CI-facing summary is board-factory's
   and it is worth knowing why nothing earlier could: an unauthenticated POST to the ingest URL answers
   401, but so does an authenticated one when the *server* side is unset, because
   `AuthenticateReleaseIngest` rejects a missing configured token identically. A 401 proves the route is
-  deployed and nothing about whether the two token values agree. **Two halves of the current pipeline
-  are still unproven, both dating from 2026-07-30:** that run posted the old `notes` field, so
-  `releaseNotes` has never been through a real publish (#36); and it posted the bytes, so the store
-  upload, the anonymous HEAD and the absolute-url assertion have never run at all (#37). The first tag
-  after 2026-07-30 is what proves both — watch the two verify steps.
+  deployed and nothing about whether the two token values agree.
+- **The store path is proven too, on 2026-07-30 with `v2.0.2`** — upload → anonymous HEAD → 201 → feed,
+  with the UF2 verified byte-identical across the store URL, the site's own `/downloads/` route and the
+  GitHub release asset, all matching the manifest's sha512. That run also proved #36's `releaseNotes`,
+  which `v2.0.0` could not: it still posted the old `notes` field. Three observations from it worth
+  keeping:
+  - The bucket is `rtlsbucket1` in Hetzner's **nbg1**, so the base is
+    `https://rtlsbucket1.nbg1.your-objectstorage.com` — not the `fsn1` the website's docs use as their
+    example. The endpoint and bucket are configured as repository **secrets**, so the logs mask them
+    to `***` and even `STORE_BASE` prints as `https://***.***`.
+  - Listing the bucket root answers 403 while objects answer 200: public-read is read-only, as the
+    contract assumes.
+  - `firmware-blank.uf2` is in the store but 404s through the site route — artifact rows gate that
+    route, and only the manifest's file has one. The blank image being unreachable from the website is
+    therefore enforced, not merely conventional.
 
 ## Notes
 

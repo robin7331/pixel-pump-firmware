@@ -5,11 +5,13 @@
 # was green. Publishing that draft fires this workflow, which delivers the
 # firmware to the website in ONE multipart POST. The endpoint is atomic
 # (verify sha512 → store → flip the feed), so a failed POST published nothing
-# and the previous release keeps serving. Contract: issue #34 /
+# and the previous release keeps serving. Contract: issue #34, amended by #36
+# (release notes live in the manifest's releaseNotes, nowhere else) /
 # robins-tools/robins-tools-website#12; the line is the PP1 sibling of PP2's,
 # byte-identical in shape — only the URL prefix, the token and the artifact
 # filename differ. Ported from pixel-pump-two-firmware's workflow of the same
-# name; keep the two in step.
+# name; keep the two in step — #36's change is still owed there as
+# pixel-pump-two-firmware#8.
 #
 # Secrets required:
 #   PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN  shared ingest secret — same value as
@@ -90,26 +92,31 @@ jobs:
           echo "ARTIFACT=pixel-pump-firmware-$VERSION.uf2" >> "$GITHUB_ENV"
           ls -lh assets/
 
-      # The release body is polished markdown. The manifest's notes wants
-      # plain text; the POST's notes field keeps the markdown. Fetched via gh
-      # (works for both triggers) and written straight to files — free-form
-      # text that may contain quotes/backticks is never string-interpolated.
-      - name: Convert release body to plain text
+      # The release body is polished markdown and travels as markdown: the
+      # manifest's releaseNotes is the ONLY place notes live (issue #36), and
+      # the site serves it exactly as ingested — no rendering, no flattening,
+      # so there is nothing to convert. Fetched via gh (works for both
+      # triggers) and written straight to a file — free-form text that may
+      # contain quotes/backticks is never string-interpolated.
+      - name: Fetch release body
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          command -v pandoc >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq pandoc; }
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > release-body.md
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body \
+            | tr -d '\r' > release-body.md
           # a bodyless release yields a lone newline — normalize to truly
-          # empty so the -s guards (no notes key, no notes field) hold
+          # empty so the -s guard (no releaseNotes key) holds
           [ -z "$(tr -d '[:space:]' < release-body.md)" ] && : > release-body.md
-          pandoc -f gfm -t plain --wrap=none release-body.md -o release-notes.txt
-          echo "== plain-text notes:"
-          cat release-notes.txt
+          echo "== release notes (markdown):"
+          cat release-body.md
 
-      # The website stores and serves this byte-for-byte — CI is the author.
-      # Serialized with yq, never hand-templated — notes are arbitrary text
-      # (colons, quotes, newlines). No electron-updater legacy fields.
+      # The website stores and serves this byte-for-byte — CI is the author, and
+      # since #36 this manifest is the whole release: releaseNotes carries the
+      # markdown, omitted entirely when the body is empty. Ingest answers 422 on
+      # `yml` if the key is present but not a string, so it must never be
+      # anything else. Serialized with yq, never hand-templated — notes are
+      # arbitrary text (colons, quotes, newlines). No electron-updater legacy
+      # fields.
       - name: Generate latest.yml
         run: |
           export SHA512="$(openssl dgst -sha512 -binary "assets/$ARTIFACT" | base64 -w0)"
@@ -120,29 +127,27 @@ jobs:
             .files = [{"url": strenv(ARTIFACT), "sha512": strenv(SHA512), "size": env(SIZE)}] |
             .releaseDate = strenv(DATE)
           ' > latest.yml
-          if [ -s release-notes.txt ]; then
-            NOTES="$(cat release-notes.txt)" yq -i '.notes = strenv(NOTES)' latest.yml
+          if [ -s release-body.md ]; then
+            NOTES="$(cat release-body.md)" yq -i '.releaseNotes = strenv(NOTES)' latest.yml
           fi
           echo "== final latest.yml:"
           cat latest.yml
 
-      # One POST, everything in it. No auto-retry: republish-is-replace makes
-      # a manual re-run safe, and ingest is atomic — a failed POST published
-      # nothing.
+      # One POST, everything in it — and since #36 the notes are inside
+      # latest.yml, not a field of their own. Do not re-add `-F notes=...`: the
+      # endpoint no longer reads it, so such a release publishes 201 with its
+      # notes going nowhere. No auto-retry: republish-is-replace makes a manual
+      # re-run safe, and ingest is atomic — a failed POST published nothing.
       - name: POST release to website ingest
         env:
           TOKEN: ${{ secrets.PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN }}
         run: |
-          form_args=(
-            -F "version=$VERSION"
-            -F "yml=@latest.yml"
-            -F "files[]=@assets/$ARTIFACT"
-          )
-          [ -s release-body.md ] && form_args+=( -F "notes=<release-body.md" )
           curl -sS --fail-with-body \
             --max-time 300 \
             -H "Authorization: Bearer $TOKEN" \
-            "${form_args[@]}" \
+            -F "version=$VERSION" \
+            -F "yml=@latest.yml" \
+            -F "files[]=@assets/$ARTIFACT" \
             "$INGEST_URL"
 
       - name: Verify production feed
@@ -155,4 +160,14 @@ jobs:
             || { echo "::error::feed serves '$served_version', expected '$VERSION'"; exit 1; }
           curl -sfSI "${FEED_URL%latest.yml}$ARTIFACT" -o /dev/null \
             || { echo "::error::artifact '$ARTIFACT' is in the feed but not downloadable"; exit 1; }
+          # The failure #36 exists to catch: notes that ingest accepts and the
+          # feed never shows. Served shape is the [{version, note}] list over
+          # the whole line, newest first — so our own entry must carry a note
+          # whenever we uploaded one.
+          if [ -s release-body.md ]; then
+            served_note="$(yq '.releaseNotes[] | select(.version == strenv(VERSION)) | .note' served.yml)"
+            [ -n "$served_note" ] && [ "$served_note" != "null" ] \
+              || { echo "::error::feed serves no notes for $VERSION — the manifest's releaseNotes key did not reach the feed (issue #36)"; exit 1; }
+            echo "feed serves notes for $VERSION"
+          fi
           echo "feed serves $served_version and '$ARTIFACT' answers — publish complete"

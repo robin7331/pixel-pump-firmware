@@ -328,7 +328,23 @@ board-factory's `docs/website-pixel-pump-firmware-endpoint.md`. What is not obvi
   bug in one, carry it across — the same standing arrangement as `protocol.py`, except this one PP1
   does not receive from PP2 automatically. `pixel_pump_main.yml` diverges more (PP1 runs
   `pump_check.py static`, PP2 does not), but as of 2026-07-29 its **release step is the same action in
-  both**, so that half travels too.
+  both**, so that half travels too. One divergence is open on purpose: PP1 took issue #36's notes
+  change on 2026-07-30 and PP2 still owes it (`pixel-pump-two-firmware#8`), so the notes handling is
+  the one part of `pixel_pump_publish.yml` where the two files legitimately differ today.
+- **Release notes live in the manifest's `releaseNotes` key and nowhere else** (issue #36, website
+  amendment 2026-07-30). The GitHub release body is the source, passed through as **raw markdown** —
+  the site serves it exactly as ingested, so there is nothing to convert (the pandoc plain-text step
+  and the POST's `notes` multipart field both went away). Three things about it are worth knowing:
+  - **A stale pipeline fails silently.** The endpoint no longer *reads* a `notes` form field or a
+    manifest `notes:` key — it ignores both, answers `201`, and the notes go nowhere. That is why the
+    publish job now asserts the served feed carries a note for its own version whenever the release
+    body was non-empty: nothing else would ever report the loss.
+  - **The key is a string going in and a list coming out.** An upload answers for one release; the
+    feed rewrites it into electron-updater's `[{version, note}]` over the whole line, newest first,
+    `note: null` for a release published without notes. So don't expect the uploaded shape back.
+  - **Present-but-not-a-string is a 422 on `yml`, with nothing stored.** Omit the key entirely for an
+    empty body — which is what the `[ -s release-body.md ]` guard is for — and keep emitting it with
+    `yq` rather than hand-templating, since notes carry colons, quotes and newlines.
 - **The draft-creating action was `marvinpinto/action-automatic-releases@latest` until 2026-07-29.**
   It is archived upstream and its `action.yml` still declares `node12`, while runners now force even
   node20 actions onto node24. It had not run here since v1.0.1 in 2023, so the first tag of the
@@ -385,7 +401,10 @@ board-factory's `docs/website-pixel-pump-firmware-endpoint.md`. What is not obvi
   and it is worth knowing why nothing earlier could: an unauthenticated POST to the ingest URL answers
   401, but so does an authenticated one when the *server* side is unset, because
   `AuthenticateReleaseIngest` rejects a missing configured token identically. A 401 proves the route is
-  deployed and nothing about whether the two token values agree.
+  deployed and nothing about whether the two token values agree. **The notes half is the exception:**
+  that run posted the old `notes` field, so `releaseNotes` has never been through a real publish, and
+  the site side of #36 was still undeployed when the workflow changed. The first tag after 2026-07-30
+  is what proves it — watch the verify step.
 
 ## Notes
 

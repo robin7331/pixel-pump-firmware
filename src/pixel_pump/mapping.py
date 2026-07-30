@@ -520,17 +520,24 @@ class MappingEngine:
                 self._render_appearance(button, appearance)
 
     def _remote_appearance(self, control_id, slot):
-        """The button's appearance in ``slot``, or None if it is not remote.
+        """The button's appearance in ``slot``, or None to leave it alone.
 
-        "Remote" means the host owns the button: something on it forwards and
-        nothing on it still acts locally. A button that keeps e.g. its
-        long-press menu is not remote, and badging it would lie.
+        A fully host-owned button (something on it forwards, nothing on it
+        still acts locally) always renders: all-zero params mean the classic
+        REMOTE_DEFAULT badge. A partly-local button renders only an explicit
+        appearance -- a non-zero param on one of its FORWARD cells
+        (pixel-pump-two-firmware#11); with all params zero it keeps the
+        state machine's own colour, so the classic badge never claims a
+        button the host does not fully own.
 
         The appearance is the first non-zero param among the FORWARD cells,
-        scanned in gesture-id order. Zero means "no preference", so an
-        implicit FORWARD never masks one a host wrote an appearance into.
+        scanned in gesture-id order; local cells never contribute (their
+        params mean other things) and never stop the scan. Zero means "no
+        preference", so an implicit FORWARD never masks one a host wrote an
+        appearance into.
         """
         forwards = False
+        local = False
         param = 0
         for gesture in APPEARANCE_SCAN:
             action, cell_param = self.table.get_raw(control_id, gesture, slot)
@@ -539,8 +546,10 @@ class MappingEngine:
                 if param == 0:
                     param = cell_param
             elif action != Action.NONE:
-                return None
+                local = True
         if not forwards:
+            return None
+        if local and param == 0:
             return None
         return decode_appearance(param)
 

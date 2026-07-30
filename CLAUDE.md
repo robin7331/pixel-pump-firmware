@@ -330,6 +330,11 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
     `PRESS` because dispatch cares about the press edge). The appearance is the first non-zero param
     among the `FORWARD` cells in id order, so an implicit zero-param `FORWARD` never masks one a host
     wrote. Don't reuse `GESTURES` here.
+  - **A partly-local button renders only an *explicit* appearance** (pixel-pump-two-firmware#11): a
+    non-zero `FORWARD` param badges it even though some gesture still acts locally (Board Factory's
+    LIFT/DROP-as-mode-buttons scheme needs exactly this); all-zero keeps the state machine's colour.
+    The classic purple `REMOTE_DEFAULT` badge stays reserved for fully host-owned buttons — on a
+    mixed button it would claim ownership the host doesn't have.
   - **A repaint must not re-take the button.** `_apply_remote_leds` re-renders when the appearance
     changes while a button stays remote, and calls `_render_appearance` *without* a second
     `begin_remote()` — that call is a no-op on an already-remote button precisely so a recolour cannot

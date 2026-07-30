@@ -13,7 +13,7 @@ is closed, and all future control features are host-side intents.
 
 | Codebase | Status | Tracking |
 |---|---|---|
-| Pixel Pump 2 firmware (this repo) | v2 implemented and hardware-verified; releases through v0.1.2 (2026-07-29) were test-only and never distributed. Unreleased: the appearance addendum (implemented, not yet bench-verified) and the VID move to `0x1137` (issue #9) — ✅ its host gate is CLEAR since 2026-07-30, the Board Factory daemon discovers on the new identity | robin7331/pixel-pump-two-firmware#4, #7, #9 |
+| Pixel Pump 2 firmware (this repo) | v2 implemented and hardware-verified; shipping since v0.1.3 (2026-07-30) under VID `0x1137`, which the Board Factory daemon discovers out of the box. The appearance addendum — including the partly-local rule — ships as of v0.1.5 (implemented; bench verification still owed). Releases through v0.1.2 were test-only and never distributed | robin7331/pixel-pump-two-firmware#4, #7, #9, #11 |
 | Pixel Pump 1 firmware | v2 released as v2.0.0 (2026-07-29) from `main` and served by the update feed (issue #30 complete); units in the field run legacy v1 (no vendor HID at all — stdin line protocol only) until they are updated. Appearance addendum implemented, not yet bench-verified | robin7331/pixel-pump-firmware#30, #35 |
 | Board Factory daemon (`board-factory/rust/pixel-pump-daemon`) | v2 shipped (#4 closed 2026-07-29); **identity-pair discovery shipped 2026-07-30** (#11 closed, `bdc6c3b`) — it matches a SET of `(VID, PID)` pairs, `0x1137:0x1062` + `0x2E8A:0x1061`, never a VID crossed with a PID list. Not yet walked against a real pump on the new VID | robin7331/board-factory#4, #11 |
 
@@ -382,7 +382,7 @@ Colors (low nibble):
 | `0x4` | `WHITE` | |
 | `0x5` | `AMBER` | |
 | `0x6` | `CYAN` | |
-| `0x7` | `OFF` | host owns the control, device shows nothing |
+| `0x7` | `OFF` | device shows nothing for this control |
 | `0x8`–`0xF` | reserved | render as `REMOTE_DEFAULT` |
 
 Animations (high nibble):
@@ -409,28 +409,38 @@ must decode as `UNKNOWN` and pass through."
 stored per `(control, gesture, slot)`. Two rules bridge the gap, both pure
 functions of the table:
 
-- A control renders an appearance only while it is **host-owned** in the
-  active slot: at least one of its gestures is `FORWARD` and none is mapped
-  to a local action (`NONE` cells are neutral). A button that keeps, say, a
-  local long-press action is not remote, and badging it would lie.
+- A control can carry an appearance while **anything on it forwards** in the
+  active slot: at least one of its gestures is `FORWARD` (`NONE` cells are
+  neutral). What renders depends on ownership:
+  - **Fully host-owned** — no gesture acts locally: the control always
+    renders. If every `FORWARD` param is zero, the appearance is `SOLID` +
+    `REMOTE_DEFAULT`, the device's classic remote rendering.
+  - **Partly local** — some gesture still acts locally: the control renders
+    only an *explicit* appearance, i.e. a non-zero `FORWARD` param. With
+    all params zero it keeps the device's own rendering. `REMOTE_DEFAULT`
+    is therefore not expressible on a partly-local control — deliberate:
+    the classic badge claims "this control is entirely the host's" and
+    would lie there. An explicit appearance claims less — "the host has
+    declared this control's colour" — which a mixed control can honestly
+    carry.
 - The control's appearance is the **first non-zero param among its `FORWARD`
-  cells, scanned in gesture-ID order** (`TAP`=1 … `PRESS`=6). If every
-  `FORWARD` param is zero, the appearance is `SOLID` + `REMOTE_DEFAULT`.
-  Zero params are "no preference" — implicit `FORWARD` cells (PP2's
-  CONNECTED default) never mask an explicitly written appearance. Hosts
-  should still write the same appearance to every `FORWARD` cell of a
-  control.
+  cells, scanned in gesture-ID order** (`TAP`=1 … `PRESS`=6). Cells mapped
+  to local actions never contribute and never stop the scan — their params
+  mean other things (e.g. `VENT_PULSE`'s duration). Zero params are "no
+  preference" — implicit `FORWARD` cells (PP2's CONNECTED default) never
+  mask an explicitly written appearance. Hosts should still write the same
+  appearance to every `FORWARD` cell of a control.
 
 **Per-device rendering:**
 
-- **PP1 — static badge.** Each host-owned button shows its appearance on its
-  own LEDs, replacing the state-machine color. `REMOTE_DEFAULT` is the
-  classic purple remote badge; `OFF` leaves the button dark; `SPIN` and
+- **PP1 — static badge.** Each button with a renderable appearance shows it
+  on its own LEDs, replacing the state-machine color. `REMOTE_DEFAULT` is
+  the classic purple remote badge; `OFF` leaves the button dark; `SPIN` and
   `RAINBOW` degrade to `SOLID`.
 - **PP2 — momentary echo.** One ring serves five controls, so a static
-  per-control badge is impossible. On a host-owned control's activation edge
-  (the wire `PRESS`), the ring briefly (~200 ms) shows that control's
-  appearance, then settles back to idle. `ENCODER` never echoes — a fast
+  per-control badge is impossible. On the activation edge (the wire
+  `PRESS`) of a control with a renderable appearance, the ring briefly
+  (~200 ms) shows it, then settles back to idle. `ENCODER` never echoes — a fast
   spin would strobe; its appearance instead **replaces the ring's idle**
   (the vendor-connected rainbow) while the vendor host is active, live on
   `SET_MAPPING`. Colors `REMOTE_DEFAULT` and `OFF` render as *no
@@ -439,10 +449,12 @@ functions of the table:
   MENU hold-progress preview and the sleep animation always win over an
   echo.
 
-**Backward compatibility.** `param = 0x00` → `SOLID` + `REMOTE_DEFAULT`,
-byte-identical to prior behavior (PP1's fixed purple badge, nothing on PP2).
-Every mapping table committed in the field is already correct; no migration,
-no version gate — the protocol version byte stays `2`.
+**Backward compatibility.** `param = 0x00` → `SOLID` + `REMOTE_DEFAULT` on
+a fully host-owned control, byte-identical to prior behavior (PP1's fixed
+purple badge, nothing on PP2); on a partly-local control it keeps the
+device's own rendering — also exactly as before. Every mapping table
+committed in the field is already correct; no migration, no version gate —
+the protocol version byte stays `2`.
 
 ### Persistence semantics
 
@@ -453,10 +465,11 @@ no version gate — the protocol version byte stays `2`.
 - **Factory reset gesture** (escape hatch): hold at power-on for 3 s —
   PP1: LIFT+DROP, PP2: MENU+ACTION. LED flash confirms; resets mappings to
   defaults and persists.
-- Host-owned controls render their persisted appearance (`FORWARD`'s param —
-  see §Control appearance): a static per-button badge on PP1, a momentary
-  ring echo on PP2. All-zero params reproduce the pre-appearance behavior —
-  the fixed purple remote badge on PP1, nothing on PP2.
+- Controls render their persisted appearance (`FORWARD`'s param — see
+  §Control appearance): a static per-button badge on PP1, a momentary ring
+  echo on PP2. All-zero params reproduce the pre-appearance behavior — the
+  fixed purple remote badge on a fully host-owned PP1 button, nothing
+  anywhere else.
 
 ### Default mapping tables
 
@@ -619,7 +632,8 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
    `SET_MAPPING` (live), persist with `COMMIT_MAPPINGS`. When assigning a
    host intent, write the control's appearance into `FORWARD`'s param —
    the same value on every `FORWARD` cell of that control (§Control
-   appearance).
+   appearance). A control you deliberately leave partly on the device
+   renders only a non-zero param — zero keeps the device's own rendering.
 7. Detect chords host-side from `PRESS`/`RELEASE`; chords exist only as host
    intents.
 8. To flash firmware: `ENTER_BOOTLOADER` with magic `0xB007`, wait for HID
@@ -646,6 +660,13 @@ resend `GET_VERSION`/`GET_INFO` on reconnect; heartbeats repair missed state.
 
 ## Changelog
 
+- **v2, partly-local appearance** (spec 2026-07-30,
+  robin7331/pixel-pump-two-firmware#11): a control that keeps a local action
+  on some gesture may still carry an appearance — an explicit non-zero
+  `FORWARD` param renders; zero keeps the device's own rendering, so the
+  classic `REMOTE_DEFAULT` badge still means "entirely host-owned". Lets a
+  host colour-match mode buttons it deliberately leaves on the device (Board
+  Factory's PP1 LIFT/DROP scheme). No wire change, no migration.
 - **v2, VID move** (2026-07-30, robin7331/pixel-pump-two-firmware#9): PP2 v2
   firmware moves from Raspberry Pi's VID `0x2E8A` to Robins Tools' own VID
   `0x1137`; the PID stays `0x1062` and nothing on the wire changes. Test

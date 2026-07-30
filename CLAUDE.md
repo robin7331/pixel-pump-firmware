@@ -318,19 +318,52 @@ Layer 1 of the spec's two-layer control model. A table keyed by `(control, gestu
 
 ## Release distribution (issue #34)
 
-Publishing a draft release fires `pixel_pump_publish.yml`, which POSTs `firmware.uf2` to
-`robins-tools.com/downloads/pixel-pump-firmware/` — the feed Board Factory reads. The **README covers
-the mechanics** (§ CI); the wire contract lives in the website repo, and the CI-facing summary is
-board-factory's `docs/website-pixel-pump-firmware-endpoint.md`. What is not obvious from either:
+Publishing a draft release fires `pixel_pump_publish.yml`, which uploads the versioned UF2s to the
+artifact bucket and then POSTs the manifest alone to `robins-tools.com/downloads/pixel-pump-firmware/`
+— the feed Board Factory reads. The **README covers the mechanics** (§ CI); the wire contract lives in
+the website repo, and the CI-facing summary is board-factory's
+`docs/website-pixel-pump-firmware-endpoint.md`. What is not obvious from either:
 
 - **Both workflows are ports of PP2's files of the same name, and the two repos should stay in step.**
-  In `pixel_pump_publish.yml` only the URL prefix, the token and the artifact filename differ. Fix a
-  bug in one, carry it across — the same standing arrangement as `protocol.py`, except this one PP1
-  does not receive from PP2 automatically. `pixel_pump_main.yml` diverges more (PP1 runs
-  `pump_check.py static`, PP2 does not), but as of 2026-07-29 its **release step is the same action in
-  both**, so that half travels too. One divergence is open on purpose: PP1 took issue #36's notes
-  change on 2026-07-30 and PP2 still owes it (`pixel-pump-two-firmware#8`), so the notes handling is
-  the one part of `pixel_pump_publish.yml` where the two files legitimately differ today.
+  In `pixel_pump_publish.yml` only the URL prefix, the token, the store prefix and the artifact
+  filenames differ. Fix a bug in one, carry it across — the same standing arrangement as
+  `protocol.py`, except this one PP1 does not receive from PP2 automatically. `pixel_pump_main.yml`
+  diverges more (PP1 runs `pump_check.py static`, PP2 does not), but as of 2026-07-29 its **release
+  step is the same action in both**, so that half travels too. Two divergences are open on purpose:
+  PP1 took issue #36's notes change on 2026-07-30 and #37's object-storage change the same day, and
+  PP2 owes both (`pixel-pump-two-firmware#8`, `#10`) — so notes handling and the upload step are where
+  the two files legitimately differ today.
+- **The artifacts go to object storage, and the POST is only the manifest** (issue #37, website
+  amendment 2026-07-30). CI uploads with the bucket's own keys before posting; ingest then proves the
+  bytes are there with an anonymous HEAD per listed file. The website holds no credentials and never
+  sees a byte of firmware. Five consequences worth having in hand:
+  - **`files[]` in the POST is now a 422, not an ignored field.** A pipeline that never uploaded fails
+    loudly rather than publishing a release whose artifacts are nowhere. The mirror-image failure —
+    ingest answering that `files` is *required* — means the site has not been switched over
+    (`RELEASE_ARTIFACT_BASE` unset on Forge) and this workflow is ahead of it. The two sides must flip
+    together; nothing else in this repo can tell you which way round a 422 on `files` means.
+  - **`size` became load-bearing.** It was always sent; now ingest compares it to the stored object's
+    `Content-Length` and 422s on a mismatch (`artifacts`) or on an entry without one (`yml`). Keep it
+    a bare int — that is why the manifest uses `env(SIZE)` and not `strenv`.
+  - **sha512 is no longer verified server-side.** It is still recorded and served, but the check that
+    the bytes are the bytes now belongs to whatever flashes the UF2. This is the one deliberate
+    reduction in the change.
+  - **The bucket must be public-read, and CI's base must equal the site's.** Hetzner buckets are
+    private by default, and a private one fails the site's HEAD, not ours — so the job runs the same
+    anonymous HEAD itself before posting, and afterwards asserts the served `files[0].url` is exactly
+    the URL it uploaded to. Those two checks are the only things that catch a CI/site base
+    disagreement; ingest can only say "not reachable".
+  - **Two names for the store, and the job accepts both.** Hetzner's S3 endpoint is the bare location
+    host (`fsn1.your-objectstorage.com`) while a bucket's public base — the site's
+    `RELEASE_ARTIFACT_BASE` — is that host with the bucket as a subdomain. `RELEASE_STORE_ENDPOINT`
+    may be either; the assert step normalizes, because the AWS CLI wants the location host and adds
+    the bucket itself, so feeding it the public base uploads to `<bucket>.<bucket>.…` and fails only
+    after the POST. It reads from a variable *or* a secret of the same name (secrets is how it is set
+    today) — nothing about a bucket name is sensitive, but as secrets they mask to `***` in exactly
+    the error messages you would want to read.
+  - **Both UF2s are uploaded, only `firmware.uf2` is listed.** The blank image is in the store because
+    the issue names both objects, but no manifest mentions it, so no client can reach it through the
+    feed — it stays a GitHub-release artifact in every sense that matters.
 - **Release notes live in the manifest's `releaseNotes` key and nowhere else** (issue #36, website
   amendment 2026-07-30). The GitHub release body is the source, passed through as **raw markdown** —
   the site serves it exactly as ingested, so there is nothing to convert (the pandoc plain-text step
@@ -394,17 +427,19 @@ board-factory's `docs/website-pixel-pump-firmware-endpoint.md`. What is not obvi
   recovery path, and it is why that trigger exists. By the same rule a tag cut before the workflow
   existed can never publish at all.
 - **Re-running is safe.** Ingest is atomic and republish-is-replace, so a failed POST published nothing
-  and the previous release keeps serving.
-- **The path is proven end to end, on 2026-07-29 with `v2.0.0`** — tag → build → draft → publish →
+  and the previous release keeps serving. The upload leg is safe to repeat too: object writes are
+  idempotent per (version, filename), and an upload with no POST behind it publishes nothing.
+- **The path was proven end to end on 2026-07-29 with `v2.0.0`** — tag → build → draft → publish →
   POST → feed, with the UF2 the website serves verified byte-identical to the GitHub release asset.
   That run is also the first thing to exercise `PIXEL_PUMP_ONE_FIRMWARE_RELEASE_TOKEN` against Forge,
   and it is worth knowing why nothing earlier could: an unauthenticated POST to the ingest URL answers
   401, but so does an authenticated one when the *server* side is unset, because
   `AuthenticateReleaseIngest` rejects a missing configured token identically. A 401 proves the route is
-  deployed and nothing about whether the two token values agree. **The notes half is the exception:**
-  that run posted the old `notes` field, so `releaseNotes` has never been through a real publish, and
-  the site side of #36 was still undeployed when the workflow changed. The first tag after 2026-07-30
-  is what proves it — watch the verify step.
+  deployed and nothing about whether the two token values agree. **Two halves of the current pipeline
+  are still unproven, both dating from 2026-07-30:** that run posted the old `notes` field, so
+  `releaseNotes` has never been through a real publish (#36); and it posted the bytes, so the store
+  upload, the anonymous HEAD and the absolute-url assertion have never run at all (#37). The first tag
+  after 2026-07-30 is what proves both — watch the two verify steps.
 
 ## Notes
 

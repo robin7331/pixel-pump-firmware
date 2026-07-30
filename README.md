@@ -306,7 +306,7 @@ The workflows do exactly the above on an Ubuntu runner:
 |---|---|---|
 | `pixel_pump_build.yml` | push to `main`, PRs into `main`, manual | both UF2s as a downloadable run artifact |
 | `pixel_pump_main.yml` | `v*` tag | draft release |
-| `pixel_pump_publish.yml` | publishing a release | pushes `firmware.uf2` to the website feed |
+| `pixel_pump_publish.yml` | publishing a release | uploads the UF2s to object storage, then the manifest to the website feed |
 
 `pixel_pump_build.yml` is how you get a testable image without cutting a tag. Its artifact — a zip of
 `firmware.uf2` and `firmware-blank.uf2`, kept 30 days — hangs off the run's summary page. Nothing
@@ -323,10 +323,16 @@ build natively as you work; CI is the backstop, not the first place you'd hit ei
 
 Releases are a two-step gesture, and the gate is yours: a `v*` tag builds and leaves a **draft**, so
 nothing is public until you review it and hit Publish. That click is what fires `pixel_pump_publish.yml`,
-which delivers `firmware.uf2` to `robins-tools.com/downloads/pixel-pump-firmware/` in one POST — the feed
-Board Factory reads to offer a firmware update. `firmware-blank.uf2` is a development image and stays on
-the GitHub release. Tag strictly as `vMAJOR.MINOR.PATCH`: the pump reports exactly three numbers over USB,
+which uploads the versioned UF2s to the artifact bucket and then POSTs the manifest alone to
+`robins-tools.com/downloads/pixel-pump-firmware/` — the feed Board Factory reads to offer a firmware
+update. Only `firmware.uf2` is listed in that manifest; `firmware-blank.uf2` is a development image and
+reaches no client. Tag strictly as `vMAJOR.MINOR.PATCH`: the pump reports exactly three numbers over USB,
 so anything else is rejected rather than published.
+
+Publishing therefore needs the bucket's write keys alongside the ingest token — secrets
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, plus `RELEASE_STORE_ENDPOINT` / `RELEASE_STORE_BUCKET`
+as either repository variables or secrets. The workflow asserts all four up front and names the
+missing one.
 
 ## Project layout
 
